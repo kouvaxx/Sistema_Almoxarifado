@@ -1,0 +1,10 @@
+{
+  "name": "Almoxarifado • Lista de Produtos v9",
+  "short_name": "Almoxarifado",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1118",
+  "theme_color": "#0b1118",
+  "lang": "pt-BR",
+  "icons": []
+}

@@ -1,0 +1,23 @@
+{
+  "name": "lista-de-produtos-v9",
+  "private": true,
+  "version": "9.0.0",
+  "description": "Sistema offline-first de almoxarifado, estoque, compras e rastreabilidade.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dexie": "^4.4.6",
+    "lucide": "^1.48.0",
+    "pdfjs-dist": "^6.3.289",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.1.0"
+  }
+}
