@@ -91,7 +91,7 @@ export interface NfeDocument {
   total?: number;
   sourceName: string;
   sourceType: 'pdf' | 'json' | 'csv' | 'manual';
-  status: 'new' | 'review' | 'processed' | 'error';
+  status: 'new' | 'review' | 'processed' | 'error' | 'cancelled';
   createdAt: string;
   note?: string;
   readerProfile?: 'danfe' | 'pedido' | 'orcamento' | 'generic';
