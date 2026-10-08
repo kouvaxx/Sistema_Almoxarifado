@@ -1,5 +1,6 @@
 import './styles.css';
-import { db, defaultConfig, loadSnapshot } from './db';
+import { db, loadSnapshot } from './db';
+import { createInitialState } from './state';
 import { CATEGORY_META, SEED_CATEGORIES, SEED_PRODUCTS, SEED_SUPPLIERS } from './seed';
 import {
   calculateWeightedAverageCost,
@@ -18,6 +19,9 @@ import type { MovementType } from './types';
 // A implementação abaixo foi restaurada a partir da versão funcional v9.2 autocontida.
 // A etapa seguinte do roadmap deve separar UI, domínio e persistência sem alterar seu comportamento.
 
+function $id<T extends HTMLElement = HTMLInputElement>(id: string): T | null {
+    return document.getElementById(id) as T | null;
+}
 const APP = 'Almoxarifado v9.2';
 const uid = (prefix = 'id') => `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
 const now = () => new Date().toISOString();
@@ -76,16 +80,16 @@ const ICONS = {
     chart: '<path d="M4 19V9M10 19V5M16 19v-8M22 19V3"/>',
     key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l2 2M14 9l2 2"/>'
 };
-const icon = (name, size = 18) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] ?? ICONS.box}</svg>`;
-let state = { products: [], suppliers: [], categories: [], movements: [], nfe: [], nfeItems: [], quotes: [], audit: [], config: defaultConfig(), view: 'dashboard', query: '', categoryId: '', supplierId: '', stockStatus: '', sort: 'name', mobileNav: false, sidebarCollapsed: false, theme: 'dark' };
+const icon = (name: string, size = 18) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${(ICONS as Record<string, string>)[name] ?? ICONS.box}</svg>`;
+let state = createInitialState();
 let productIndex = new Map();
 let productCodeIndex = new Map();
 let productNormalizedCodeIndex = new Map();
 let productNameIndex = new Map();
 let supplierIndex = new Map();
 let categoryIndex = new Map();
-let pendingPhotoFile;
-let photoSearchFile;
+let pendingPhotoFile: File | undefined;
+let photoSearchFile: File | undefined;
 function rebuildIndexes() { productIndex = new Map(state.products.map(p => [p.id, p])); productCodeIndex = new Map(); productNormalizedCodeIndex = new Map(); productNameIndex = new Map(); for (const p of state.products) {
     productCodeIndex.set(String(p.code).trim(), p);
     const nc = normalizedCode(p.code);
@@ -100,13 +104,13 @@ function getCategory(id) { return categoryIndex.get(id) ?? state.categories.find
 const statusFor = getStockStatus;
 const statusLabel = stockStatusLabel;
 const statusClass = stockStatusClass;
-function log(type, message, detail, entityType, entityId) {
+function log(type: AuditEntry['type'], message: string, detail?: string, entityType?: string, entityId?: string) {
     const item = { id: uid('audit'), type, message, detail, entityType, entityId, createdAt: now() };
     state.audit.unshift(item);
     state.audit = state.audit.slice(0, 3000);
     db.put('audit', item).catch(() => { });
 }
-function toast(message, type = 'success') {
+function toast(message: string, type: 'success' | 'warning' | 'error' = 'success') {
     const el = document.createElement('div');
     el.className = `toast ${type}`;
     el.innerHTML = `<span>${type === 'success' ? icon('check', 16) : type === 'warning' ? icon('alert', 16) : icon('alert', 16)}</span>${esc(message)}`;
@@ -335,7 +339,7 @@ function openProductDrawer(productId) {
     <div class="form-section"><div class="form-section-title">Identificação visual</div><label>Foto de referência<input id="p-photo" type="file" accept="image/*" capture="environment" /><small class="field-help">Usada pela Busca por foto. A imagem fica neste dispositivo.</small><span class="photo-state">${p?.photoHash ? '✓ Foto de referência cadastrada' : 'Nenhuma foto cadastrada'}</span></label></div><div class="form-section"><div class="form-section-title">Estoque e custo</div><div class="form-grid"><label>Estoque atual<input id="p-stock" type="number" min="0" step="0.001" value="${p?.currentStock ?? 0}" ${isNew ? '' : 'disabled'} /></label><label>Estoque mínimo<input id="p-min" type="number" min="0" step="0.001" value="${p?.minimumStock ?? state.config.defaultMinimumStock}" /></label></div><div class="form-grid"><label>Custo atual<input id="p-cost" type="number" min="0" step="0.01" value="${p?.currentCost ?? 0}" /></label><label>Estoque máximo<input id="p-max" type="number" min="0" step="0.001" value="${p?.maximumStock ?? ''}" placeholder="Opcional" /></label></div></div>
     ${!isNew ? `<div class="form-section"><div class="detail-strip"><div><span>Disponível</span><b>${qty(Math.max(0, p.currentStock - p.reservedStock))}</b></div><div><span>Valor estoque</span><b>${money(p.currentStock * p.currentCost)}</b></div><div><span>Status</span><b class="${statusClass(statusFor(p))}">${statusLabel(statusFor(p))}</b></div></div></div>` : ''}
   </div><div class="drawer-foot">${!isNew ? `<button class="btn btn-danger ghost" data-action="delete-product" data-id="${p.id}">${icon('trash', 15)} Excluir</button>` : '<span></span>'}<div><button class="btn btn-secondary" data-action="close-drawer">Cancelar</button><button class="btn btn-primary" data-action="save-product" data-id="${p?.id || ''}">${icon('check', 15)} ${isNew ? 'Criar produto' : 'Salvar alterações'}</button></div></div></aside></div>`;
-    const root = document.getElementById('drawer-root');
+    const root = $id('drawer-root');
     root.innerHTML = html;
     requestAnimationFrame(() => root.querySelector('.drawer-overlay')?.classList.add('open'));
 }
@@ -353,7 +357,7 @@ function openQuoteModal() {
         existing.quantity += 1;
     else
         cart.push({ productId: id, quantity: 1, unitPrice: p.currentCost }); select.value = ''; paint(); });
-    cartEl.addEventListener('input', e => { const el = e.target.closest('[data-q-idx]'); if (el)
+    cartEl.addEventListener('input', e => { const el = (e.target as HTMLElement).closest('[data-q-idx]'); if (el)
         cart[Number(el.dataset.qIdx)].quantity = Math.max(1, Number(el.value) || 1); });
     cartEl.addEventListener('click', e => { const el = e.target.closest('[data-q-remove]'); if (el) {
         cart.splice(Number(el.dataset.qRemove), 1);
@@ -1411,7 +1415,7 @@ catch { } toast('Não foi possível compartilhar o acesso.', 'warning'); }
 function printReport() { window.print(); }
 function wire() {
     document.addEventListener('click', async (e) => {
-        const t = e.target;
+        const t = e.target as HTMLElement;
         const v = t.closest('[data-view]');
         if (v) {
             closeModal();
@@ -1725,8 +1729,8 @@ async function init() {
         navigator.serviceWorker.register('/sw.js').catch(() => { });
 }
 let pageRenderFrame = 0;
-let pendingQueryCaret;
-function schedulePageRender(caret) { if (caret !== undefined)
+let pendingQueryCaret: number | undefined;
+function schedulePageRender(caret?: number) { if (caret !== undefined)
     pendingQueryCaret = caret; if (pageRenderFrame)
     return; pageRenderFrame = requestAnimationFrame(() => { pageRenderFrame = 0; renderPage(); if (pendingQueryCaret !== undefined) {
     const input = document.getElementById('query');
@@ -1737,7 +1741,7 @@ function schedulePageRender(caret) { if (caret !== undefined)
     }
     pendingQueryCaret = undefined;
 } }); }
-function rebuildNavState() { document.querySelectorAll('.nav-item[data-view]').forEach(el => el.classList.toggle('active', el.dataset.view === state.view)); const badge = document.querySelector('.nav-item[data-view="nfe"] .nav-badge'); const pending = state.nfe.filter(n => n.status === 'new' || n.status === 'review').length; if (pending && badge)
+function rebuildNavState() { document.querySelectorAll('.nav-item[data-view]').forEach(el => el.classList.toggle('active', (el as HTMLElement).dataset.view === state.view)); const badge = document.querySelector('.nav-item[data-view="nfe"] .nav-badge'); const pending = state.nfe.filter(n => n.status === 'new' || n.status === 'review').length; if (pending && badge)
     badge.textContent = String(pending);
 else if (!pending && badge)
     badge.remove(); }
