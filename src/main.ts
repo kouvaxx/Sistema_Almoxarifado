@@ -510,6 +510,7 @@ async function processNfe(id) {
     const n = state.nfe.find(x => x.id === id);
     if (!n)
         return;
+
     const result = await processNfeDocument({
         nfe: n,
         items: state.nfeItems.filter(item => item.nfeId === id),
@@ -518,13 +519,37 @@ async function processNfe(id) {
         categories: state.categories,
         config: state.config,
     });
+
     if ('message' in result) {
         toast(result.message, 'warning');
         return;
     }
+
+    for (const supplier of result.createdSuppliers)
+        state.suppliers.push(supplier);
+
+    for (const product of result.changedProducts) {
+        const index = state.products.findIndex(candidate => candidate.id === product.id);
+        if (index >= 0)
+            state.products[index] = product;
+        else
+            state.products.unshift(product);
+    }
+
+    for (const item of result.updatedItems) {
+        const index = state.nfeItems.findIndex(candidate => candidate.id === item.id);
+        if (index >= 0)
+            state.nfeItems[index] = item;
+    }
+
+    const nfeIndex = state.nfe.findIndex(candidate => candidate.id === result.nfe.id);
+    if (nfeIndex >= 0)
+        state.nfe[nfeIndex] = result.nfe;
+
     state.movements.unshift(...result.movements.slice().reverse());
     rebuildIndexes();
-    log('import', `Documento processado: ${n.sourceName}`, `${result.updatedProductCount} movimentos · ${result.createdProductCount} novos produtos`, 'nfe', id);
+
+    log('import', `Documento processado: ${result.nfe.sourceName}`, `${result.updatedProductCount} movimentos · ${result.createdProductCount} novos produtos`, 'nfe', id);
     closeModal();
     renderPage();
     toast(`Entrada confirmada: ${result.updatedProductCount} movimentos · ${result.createdProductCount} novos`, 'success');
