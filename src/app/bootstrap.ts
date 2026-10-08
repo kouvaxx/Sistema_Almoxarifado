@@ -1,3 +1,7 @@
+const uid = (prefix = 'id') => `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+const now = () => new Date().toISOString();
+const norm = (value: unknown): string => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
 import { db, defaultConfig, loadSnapshot } from '../db';
 import { CATEGORY_META, SEED_CATEGORIES, SEED_PRODUCTS, SEED_SUPPLIERS } from '../seed';
 
@@ -25,7 +29,7 @@ export async function seedDatabase() {
     await db.put('config', config);
     return { products, suppliers, categories, movements, nfe, nfeItems, quotes, audit, config };
 }
-export async function tryLegacyMigration() {
+export async function tryLegacyMigration(logMigration?: (type: 'import', message: string, detail?: string) => void) {
     try {
         const legacy = localStorage.getItem('produtos_lista_v8');
         if (!legacy)
@@ -61,7 +65,7 @@ export async function tryLegacyMigration() {
         await db.bulkPut('products', products);
         const config = defaultConfig();
         await db.put('config', config);
-        log('import', `Migração da v8 concluída: ${products.length} produtos`, 'Origem: localStorage produtos_lista_v8');
+        logMigration?.('import', `Migração da v8 concluída: ${products.length} produtos`, 'Origem: localStorage produtos_lista_v8');
         return true;
     }
     catch {
