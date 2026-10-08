@@ -1,0 +1,70 @@
+import { db, defaultConfig, loadSnapshot } from '../db';
+import { CATEGORY_META, SEED_CATEGORIES, SEED_PRODUCTS, SEED_SUPPLIERS } from '../seed';
+
+export async function seedDatabase() {
+    const snapshot = await loadSnapshot();
+    if (snapshot.products.length)
+        return snapshot;
+    const categories = SEED_CATEGORIES;
+    const suppliers = SEED_SUPPLIERS;
+    const products = SEED_PRODUCTS;
+    const movements = [];
+    const quotes = [];
+    const nfe = [];
+    const nfeItems = [];
+    const audit = [];
+    const config = defaultConfig();
+    await db.bulkPut('categories', categories);
+    await db.bulkPut('suppliers', suppliers);
+    await db.bulkPut('products', products);
+    await db.bulkPut('movements', movements);
+    await db.bulkPut('quotes', quotes);
+    await db.bulkPut('audit', audit);
+    await db.bulkPut('nfe', nfe);
+    await db.bulkPut('nfeItems', []);
+    await db.put('config', config);
+    return { products, suppliers, categories, movements, nfe, nfeItems, quotes, audit, config };
+}
+export async function tryLegacyMigration() {
+    try {
+        const legacy = localStorage.getItem('produtos_lista_v8');
+        if (!legacy)
+            return false;
+        const existing = await db.getAll('products');
+        if (existing.length)
+            return false;
+        const arr = JSON.parse(legacy);
+        if (!Array.isArray(arr) || !arr.length)
+            return false;
+        const suppliersByName = new Map();
+        const categoriesByName = new Map();
+        const products = [];
+        const t = now();
+        for (const [i, p] of arr.entries()) {
+            const supplierName = String(p.fornecedor || '—').trim();
+            let supplierId;
+            if (supplierName && supplierName !== '?' && supplierName !== '—') {
+                supplierId = 'sup-' + norm(supplierName).replace(/[^a-z0-9]+/g, '-');
+                if (!suppliersByName.has(supplierName))
+                    suppliersByName.set(supplierName, { id: supplierId, name: supplierName, active: true, createdAt: t, updatedAt: t });
+            }
+            const catName = String(p.categoria || 'Outros');
+            const catId = 'cat-' + norm(catName).replace(/[^a-z0-9]+/g, '-');
+            if (!categoriesByName.has(catName))
+                categoriesByName.set(catName, { id: catId, name: catName, icon: CATEGORY_META[catName]?.icon ?? 'Lista', tone: CATEGORY_META[catName]?.tone ?? 'slate' });
+            const stock = Math.max(0, Number(p.estoqueAtual ?? p.quantidade) || 0);
+            const cost = Math.max(0, Number(p.preco) || 0);
+            products.push({ id: uid('p'), code: String(p.id ?? '—'), name: String(p.nome || '').trim().toUpperCase(), supplierId, supplierNameLegacy: supplierName, categoryId: catId, unit: p.unidade || 'un', currentStock: stock, minimumStock: 2, reservedStock: 0, currentCost: cost, averageCost: cost, active: true, createdAt: t, updatedAt: t, legacySource: 'v8-import' });
+        }
+        await db.bulkPut('suppliers', [...suppliersByName.values()]);
+        await db.bulkPut('categories', [...categoriesByName.values()]);
+        await db.bulkPut('products', products);
+        const config = defaultConfig();
+        await db.put('config', config);
+        log('import', `Migração da v8 concluída: ${products.length} produtos`, 'Origem: localStorage produtos_lista_v8');
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
