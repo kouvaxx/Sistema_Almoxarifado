@@ -32,7 +32,6 @@ import type {
 
 // A implementação abaixo foi restaurada a partir da versão funcional v9.2 autocontida.
 // A etapa seguinte do roadmap deve separar UI, domínio e persistência sem alterar seu comportamento.
-// @ts-nocheck
 
 const APP = 'Almoxarifado v9.2';
 const uid = (prefix = 'id') => `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
