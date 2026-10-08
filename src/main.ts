@@ -605,7 +605,7 @@ async function processNfe(id) { const n = state.nfe.find(x => x.id === id); if (
         p.lastPurchaseAt = n.issueDate || now();
         p.updatedAt = now();
         await db.put('products', p);
-        const m = { id: uid('mov'), productId: p.id, productCode: p.code, productName: p.name, type: 'entrada', quantity: amount, unitCost: cost, document: n.number || n.key || n.sourceName, note: `Importação inteligente · ${n.readerProfile || 'documento'} · ${item.matchMethod || 'sem-match'}`, createdAt: now() };
+        const m: Movement = { id: uid('mov'), productId: p.id, productCode: p.code, productName: p.name, type: 'entrada', quantity: amount, unitCost: cost, document: n.number || n.key || n.sourceName, note: `Importação inteligente · ${n.readerProfile || 'documento'} · ${item.matchMethod || 'sem-match'}`, createdAt: now() };
         state.movements.unshift(m);
         await db.put('movements', m);
         item.status = 'update';
@@ -1181,7 +1181,7 @@ async function importCsv(text, name) {
         return;
     }
 
-    const n = {
+    const n: NfeDocument = {
         id: uid('nfe'),
         sourceName: name,
         sourceType: 'csv',
@@ -1222,7 +1222,7 @@ async function importCsv(text, name) {
         await db.put('products', p);
 
         if (raw.currentStock > 0) {
-            const movement = {
+            const movement: Movement = {
                 id: uid('mov'),
                 productId: p.id,
                 productCode: p.code,
@@ -1319,7 +1319,7 @@ async function importSnapshot(parsed, name) {
             supplierId = supplier.id;
         }
 
-        const product = {
+        const product: Product = {
             id: uid('p'),
             code,
             name: nameValue,
