@@ -26,7 +26,7 @@ export async function seedDatabase() {
     await db.bulkPut('audit', audit);
     await db.bulkPut('nfe', nfe);
     await db.bulkPut('nfeItems', []);
-    await db.put('config', config);
+    await repository.saveConfig(config);
     return { products, suppliers, categories, movements, nfe, nfeItems, quotes, audit, config };
 }
 export async function tryLegacyMigration(logMigration?: (type: 'import', message: string, detail?: string) => void) {
@@ -64,7 +64,7 @@ export async function tryLegacyMigration(logMigration?: (type: 'import', message
         await db.bulkPut('categories', [...categoriesByName.values()]);
         await db.bulkPut('products', products);
         const config = defaultConfig();
-        await db.put('config', config);
+        await repository.saveConfig(config);
         logMigration?.('import', `Migração da v8 concluída: ${products.length} produtos`, 'Origem: localStorage produtos_lista_v8');
         return true;
     }
