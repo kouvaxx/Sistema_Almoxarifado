@@ -3,7 +3,7 @@ import { db, defaultConfig, loadSnapshot } from './db';
 import { createInitialState } from './state';
 import { analyzeTextDocument } from './domain/nfe-parser';
 import { applyImportedItems } from './domain/nfe-matching';
-import { normalizedPhotoCode, searchPhoto } from './app/photo-search';
+import { imageDHash, normalizedPhotoCode, searchPhoto } from './app/photo-search';
 import { seedDatabase, tryLegacyMigration } from './app/bootstrap';
 import { nfePdfReader } from './app/nfe-pdf-reader';
 import { CATEGORY_META } from './seed';
@@ -103,7 +103,7 @@ let pendingPhotoFile: File | undefined;
 let photoSearchFile: File | undefined;
 function rebuildIndexes() { productIndex = new Map(state.products.map(p => [p.id, p])); productCodeIndex = new Map(); productNormalizedCodeIndex = new Map(); productNameIndex = new Map(); for (const p of state.products) {
     productCodeIndex.set(String(p.code).trim(), p);
-    const nc = normalizedCode(p.code);
+    const nc = normalizedPhotoCode(p.code);
     const bucket = productNormalizedCodeIndex.get(nc) || [];
     bucket.push(p);
     productNormalizedCodeIndex.set(nc, bucket);
@@ -558,7 +558,7 @@ function lookupCode() { const code = $id('scan-code')?.value.trim(); if (!code)
     return;
 } closeModal(); openProductDrawer(p.id); }
 async function parsePdfMetadata(file: File) { return nfePdfReader.read(file); }
-async async function searchByPhoto(file) { if (!file.type.startsWith('image/')) {
+async function searchByPhoto(file) { if (!file.type.startsWith('image/')) {
     toast('Selecione uma imagem.', 'warning');
     return;
 } photoSearchFile = file; pendingPhotoFile = undefined; const { barcode, matches } = await searchPhoto(file, state.products); if (barcode) {
