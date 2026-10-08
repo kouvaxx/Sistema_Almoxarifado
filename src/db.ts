@@ -169,8 +169,28 @@ class LocalDB {
     if (!this.db) throw new Error('Banco não inicializado.');
     return this.db;
   }
-  async readyForTransaction(): Promise<IDBDatabase> {
-    return this.ready();
+  async runTransaction(
+    stores: StoreName[],
+    apply: (transaction: IDBTransaction) => void,
+  ): Promise<void> {
+    const db = await this.ready();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(stores, 'readwrite');
+
+      try {
+        apply(transaction);
+      } catch (error) {
+        transaction.abort();
+        reject(error);
+        return;
+      }
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error('Transação falhou.'));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error('Transação abortada.'));
+    });
   }
 
 
@@ -276,7 +296,6 @@ export async function loadSnapshot(): Promise<DatabaseSnapshot> {
 }
 
 export async function replaceSnapshot(snapshot: DatabaseSnapshot): Promise<void> {
-  const dbInstance = await db.readyForTransaction();
   const stores: StoreName[] = [
     'products',
     'suppliers',
@@ -305,26 +324,14 @@ export async function replaceSnapshot(snapshot: DatabaseSnapshot): Promise<void>
     ['nfeFiles', []],
   ];
 
-  await new Promise<void>((resolve, reject) => {
-    const tx = dbInstance.transaction(stores, 'readwrite');
-
-    try {
-      for (const [store, values] of sets) {
-        const os = tx.objectStore(store);
-        os.clear();
-        for (const value of values) {
-          os.put(value);
-        }
+  await db.runTransaction(stores, tx => {
+    for (const [store, values] of sets) {
+      const os = tx.objectStore(store);
+      os.clear();
+      for (const value of values) {
+        os.put(value);
       }
-    } catch (error) {
-      tx.abort();
-      reject(error);
-      return;
     }
-
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('Falha ao substituir o snapshot.'));
-    tx.onabort = () => reject(tx.error ?? new Error('Substituição do snapshot abortada.'));
   });
 }
 
