@@ -1,8 +1,7 @@
 import './styles.css';
-import { db, defaultConfig, loadSnapshot, replaceSnapshot } from './db';
+import { db, defaultConfig, loadSnapshot } from './db';
 import { CATEGORY_META, SEED_CATEGORIES, SEED_PRODUCTS, SEED_SUPPLIERS } from './seed';
 import {
-  calculateNextStock,
   calculateWeightedAverageCost,
   getStockStatus,
   movementTypeLabel,
@@ -14,21 +13,7 @@ import {
   validateInventoryCount,
   validateStockMovement,
 } from './domain/validation';
-import type {
-  AppConfig,
-  AuditEntry,
-  Category,
-  DatabaseSnapshot,
-  Movement,
-  MovementType,
-  NfeDocument,
-  NfeItem,
-  Product,
-  Quote,
-  QuoteItem,
-  Supplier,
-  View,
-} from './types';
+import type { MovementType } from './types';
 
 // A implementação abaixo foi restaurada a partir da versão funcional v9.2 autocontida.
 // A etapa seguinte do roadmap deve separar UI, domínio e persistência sem alterar seu comportamento.
