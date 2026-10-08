@@ -1,4 +1,4 @@
-import { db } from '../db';
+import { db, defaultConfig, loadSnapshot } from '../db';
 import type {
   AppConfig,
   AuditEntry,
@@ -14,6 +14,30 @@ import type {
 } from '../types';
 
 export const repository = {
+  loadSnapshot(): Promise<import('../types').DatabaseSnapshot> {
+    return loadSnapshot();
+  },
+
+  createDefaultConfig(): AppConfig {
+    return defaultConfig();
+  },
+
+  getProducts(): Promise<Product[]> {
+    return db.getAll<Product>('products');
+  },
+
+  saveProducts(values: Product[]): Promise<void> {
+    return db.bulkPut('products', values);
+  },
+
+  saveSuppliers(values: Supplier[]): Promise<void> {
+    return db.bulkPut('suppliers', values);
+  },
+
+  saveCategories(values: Category[]): Promise<void> {
+    return db.bulkPut('categories', values);
+  },
+
   saveAudit(value: AuditEntry): Promise<void> {
     return db.put('audit', value);
   },
@@ -34,12 +58,24 @@ export const repository = {
     return db.put('categories', value);
   },
 
+  saveMovements(values: Movement[]): Promise<void> {
+    return db.bulkPut('movements', values);
+  },
+
   saveMovement(value: Movement): Promise<void> {
     return db.put('movements', value);
   },
 
+  saveQuotes(values: Quote[]): Promise<void> {
+    return db.bulkPut('quotes', values);
+  },
+
   saveQuote(value: Quote): Promise<void> {
     return db.put('quotes', value);
+  },
+
+  saveNfes(values: NfeDocument[]): Promise<void> {
+    return db.bulkPut('nfe', values);
   },
 
   saveNfe(value: NfeDocument): Promise<void> {
