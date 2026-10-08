@@ -1585,7 +1585,7 @@ else if (!pending && badge)
     badge.remove(); }
 function renderPage() { const page = document.querySelector('.page'); if (page)
     page.innerHTML = renderView(); rebuildNavState(); }
-function renderPage() { document.getElementById('app').innerHTML = shell(); }
+function render() { document.getElementById('app').innerHTML = shell(); }
 init().catch(err => { document.getElementById('app').innerHTML = `<div style="padding:40px;font-family:system-ui;color:#fff;background:#0b1118;min-height:100vh"><h1>Não foi possível iniciar</h1><p>${esc(err?.message || err)}</p></div>`; });
 
 export {};
