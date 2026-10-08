@@ -22,6 +22,12 @@ import type { AuditEntry, MovementType } from './types';
 function $id<T extends HTMLElement = HTMLInputElement>(id: string): T | null {
     return document.getElementById(id) as T | null;
 }
+function $q<T extends HTMLElement = HTMLInputElement>(root: ParentNode, selector: string): T | null {
+    return $q(root, selector) as T | null;
+}
+function $qa<T extends HTMLElement = HTMLInputElement>(root: ParentNode, selector: string): T[] {
+    return Array.from($qa(root, selector)) as T[];
+}
 const APP = 'Almoxarifado v9.2';
 const uid = (prefix = 'id') => `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
 const now = () => new Date().toISOString();
@@ -341,9 +347,9 @@ function openProductDrawer(productId) {
   </div><div class="drawer-foot">${!isNew ? `<button class="btn btn-danger ghost" data-action="delete-product" data-id="${p.id}">${icon('trash', 15)} Excluir</button>` : '<span></span>'}<div><button class="btn btn-secondary" data-action="close-drawer">Cancelar</button><button class="btn btn-primary" data-action="save-product" data-id="${p?.id || ''}">${icon('check', 15)} ${isNew ? 'Criar produto' : 'Salvar alterações'}</button></div></div></aside></div>`;
     const root = $id('drawer-root');
     root.innerHTML = html;
-    requestAnimationFrame(() => root.querySelector('.drawer-overlay')?.classList.add('open'));
+    requestAnimationFrame(() => $q(root, '.drawer-overlay')?.classList.add('open'));
 }
-function openSupplierDrawer(supplierId) { const s = supplierId ? getSupplier(supplierId) : undefined; const ps = state.products.filter(p => p.supplierId === supplierId); const html = `<div class="drawer-overlay" data-action="close-drawer"><aside class="drawer" data-stop><div class="drawer-head"><div><div class="eyebrow">FORNECEDOR</div><h2>${s ? esc(s.name) : 'Novo fornecedor'}</h2><p>${s ? esc(s.cnpj || 'Cadastro sem CNPJ') : 'Dados de contato e compra'}</p></div><button class="icon-btn" data-action="close-drawer">${icon('close', 20)}</button></div><div class="drawer-body"><div class="form-section"><div class="form-section-title">Identificação</div><label>Nome *<input id="s-name" value="${esc(s?.name || '')}" /></label><div class="form-grid"><label>CNPJ<input id="s-cnpj" value="${esc(s?.cnpj || '')}" /></label><label>Contato<input id="s-contact" value="${esc(s?.contact || '')}" /></label></div><div class="form-grid"><label>Telefone<input id="s-phone" value="${esc(s?.phone || '')}" /></label><label>WhatsApp<input id="s-whatsapp" value="${esc(s?.whatsapp || '')}" /></label></div><label>E-mail<input id="s-email" value="${esc(s?.email || '')}" /></label><div class="form-grid"><label>Prazo médio (dias)<input id="s-lead" type="number" min="0" value="${s?.averageLeadDays ?? ''}" /></label><label>Condição pagamento<input id="s-payment" value="${esc(s?.paymentTerms || '')}" /></label></div></div>${s ? `<div class="form-section"><div class="form-section-title">Produtos vinculados</div>${ps.slice(0, 12).map(p => `<button class="mini-product-row" data-product="${p.id}"><span>${esc(p.name)}<small>${esc(p.code)}</small></span><b>${money(p.currentCost)}</b>${icon('arrow', 14)}</button>`).join('') || '<span class="muted">Nenhum produto vinculado.</span>'}</div>` : ''}</div><div class="drawer-foot">${s ? `<button class="btn btn-danger ghost" data-action="delete-supplier" data-id="${s.id}">${icon('trash', 15)} Desativar</button>` : '<span></span>'}<div><button class="btn btn-secondary" data-action="close-drawer">Cancelar</button><button class="btn btn-primary" data-action="save-supplier" data-id="${s?.id || ''}">${icon('check', 15)} Salvar fornecedor</button></div></div></aside></div>`; const root = document.getElementById('drawer-root'); root.innerHTML = html; requestAnimationFrame(() => root.querySelector('.drawer-overlay')?.classList.add('open')); }
+function openSupplierDrawer(supplierId) { const s = supplierId ? getSupplier(supplierId) : undefined; const ps = state.products.filter(p => p.supplierId === supplierId); const html = `<div class="drawer-overlay" data-action="close-drawer"><aside class="drawer" data-stop><div class="drawer-head"><div><div class="eyebrow">FORNECEDOR</div><h2>${s ? esc(s.name) : 'Novo fornecedor'}</h2><p>${s ? esc(s.cnpj || 'Cadastro sem CNPJ') : 'Dados de contato e compra'}</p></div><button class="icon-btn" data-action="close-drawer">${icon('close', 20)}</button></div><div class="drawer-body"><div class="form-section"><div class="form-section-title">Identificação</div><label>Nome *<input id="s-name" value="${esc(s?.name || '')}" /></label><div class="form-grid"><label>CNPJ<input id="s-cnpj" value="${esc(s?.cnpj || '')}" /></label><label>Contato<input id="s-contact" value="${esc(s?.contact || '')}" /></label></div><div class="form-grid"><label>Telefone<input id="s-phone" value="${esc(s?.phone || '')}" /></label><label>WhatsApp<input id="s-whatsapp" value="${esc(s?.whatsapp || '')}" /></label></div><label>E-mail<input id="s-email" value="${esc(s?.email || '')}" /></label><div class="form-grid"><label>Prazo médio (dias)<input id="s-lead" type="number" min="0" value="${s?.averageLeadDays ?? ''}" /></label><label>Condição pagamento<input id="s-payment" value="${esc(s?.paymentTerms || '')}" /></label></div></div>${s ? `<div class="form-section"><div class="form-section-title">Produtos vinculados</div>${ps.slice(0, 12).map(p => `<button class="mini-product-row" data-product="${p.id}"><span>${esc(p.name)}<small>${esc(p.code)}</small></span><b>${money(p.currentCost)}</b>${icon('arrow', 14)}</button>`).join('') || '<span class="muted">Nenhum produto vinculado.</span>'}</div>` : ''}</div><div class="drawer-foot">${s ? `<button class="btn btn-danger ghost" data-action="delete-supplier" data-id="${s.id}">${icon('trash', 15)} Desativar</button>` : '<span></span>'}<div><button class="btn btn-secondary" data-action="close-drawer">Cancelar</button><button class="btn btn-primary" data-action="save-supplier" data-id="${s?.id || ''}">${icon('check', 15)} Salvar fornecedor</button></div></div></aside></div>`; const root = document.getElementById('drawer-root'); root.innerHTML = html; requestAnimationFrame(() => $q(root, '.drawer-overlay')?.classList.add('open')); }
 function openMovementModal() { const products = state.products.filter(p => p.active).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')); showModal('Nova movimentação', `<div class="modal-grid"><label>Produto<select id="m-product">${products.map(p => `<option value="${p.id}">${esc(p.name)} · ${qty(p.currentStock)} ${esc(p.unit)}</option>`).join('')}</select></label><label>Tipo<select id="m-type"><option value="entrada">Entrada</option><option value="saida">Saída</option><option value="ajuste">Ajuste de saldo</option><option value="devolucao">Devolução</option><option value="transferencia">Transferência</option></select></label></div><div class="modal-grid"><label>Quantidade<input id="m-qty" type="number" min="0.001" step="0.001" value="1" /></label><label>Custo unitário<input id="m-cost" type="number" min="0" step="0.01" value="0" /></label></div><div class="modal-grid"><label>Documento<input id="m-doc" placeholder="NF-e, OS, inventário..." /></label><label>Responsável<input id="m-resp" placeholder="Nome" /></label></div><div class="modal-grid"><label>Ordem de serviço<input id="m-os" placeholder="Opcional" /></label><label>Veículo<input id="m-vehicle" placeholder="Opcional" /></label></div><label>Observação<textarea id="m-note" rows="3" placeholder="Motivo, origem ou destino..."></textarea></label><div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Cancelar</button><button class="btn btn-primary" data-action="save-movement">${icon('check', 15)} Registrar</button></div>`); }
 function openQuoteModal() {
     const products = state.products.filter(p => p.active);
@@ -365,7 +371,7 @@ function openQuoteModal() {
     } });
     window._quoteCart = () => cart;
 }
-function showModal(title, body) { const root = document.getElementById('modal-root'); root.innerHTML = `<div class="modal-overlay" data-action="close-modal"><div class="modal" data-stop><div class="modal-head"><div><div class="eyebrow">AÇÃO</div><h2>${title}</h2></div><button class="icon-btn" data-action="close-modal">${icon('close', 20)}</button></div><div class="modal-body">${body}</div></div></div>`; requestAnimationFrame(() => root.querySelector('.modal-overlay')?.classList.add('open')); }
+function showModal(title, body) { const root = document.getElementById('modal-root'); root.innerHTML = `<div class="modal-overlay" data-action="close-modal"><div class="modal" data-stop><div class="modal-head"><div><div class="eyebrow">AÇÃO</div><h2>${title}</h2></div><button class="icon-btn" data-action="close-modal">${icon('close', 20)}</button></div><div class="modal-body">${body}</div></div></div>`; requestAnimationFrame(() => $q(root, '.modal-overlay')?.classList.add('open')); }
 async function saveProduct(id) {
     const name = document.getElementById('p-name').value.trim().toUpperCase();
     if (!name) {
@@ -492,7 +498,7 @@ async function saveMovement() {
 }
 const typeLabel = movementTypeLabel;
 async function saveInventory() {
-    const inputs = [...document.querySelectorAll('.inventory-input')];
+    const inputs = [...$qa(document, '.inventory-input')];
     const changes = [];
 
     for (const input of inputs) {
@@ -1388,7 +1394,7 @@ function commandPalette(initial = '') { showModal('Pesquisa rápida', `<div clas
 function updateQuickSearch() { const input = document.getElementById('command-search'); const root = document.getElementById('quick-search-results'); if (input && root)
     root.innerHTML = quickSearchHtml(input.value); }
 function closeDrawer() { const root = document.getElementById('drawer-root'); if (!root)
-    return; const ov = root.querySelector('.drawer-overlay'); ov?.classList.remove('open'); setTimeout(() => root.innerHTML = '', 160); }
+    return; const ov = $q(root, '.drawer-overlay'); ov?.classList.remove('open'); setTimeout(() => root.innerHTML = '', 160); }
 function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
 async function applyConfig() { const negative = document.getElementById('cfg-negative')?.checked; const lite = document.getElementById('cfg-lite')?.checked; if (negative !== undefined) {
     state.config.allowNegativeStock = negative;
@@ -1396,7 +1402,7 @@ async function applyConfig() { const negative = document.getElementById('cfg-neg
     if (lite !== undefined)
         state.config.liteMode = lite;
     await db.put('config', state.config);
-    document.querySelector('.app-shell')?.classList.toggle('lite-mode', !!state.config.liteMode);
+    $q(document, '.app-shell')?.classList.toggle('lite-mode', !!state.config.liteMode);
     log('system', 'Configurações atualizadas', `Modo Lite: ${state.config.liteMode ? 'ativado' : 'desativado'}`);
     toast('Configurações salvas');
 } }
@@ -1473,20 +1479,20 @@ function wire() {
                 state.sidebarCollapsed = !state.sidebarCollapsed;
                 state.mobileNav = false;
             }
-            const shell = document.querySelector('.app-shell');
+            const shell = $q(document, '.app-shell');
             shell?.classList.toggle('sidebar-collapsed', state.sidebarCollapsed);
             shell?.classList.toggle('mobile-nav', state.mobileNav);
-            document.querySelector('.sidebar-backdrop')?.classList.toggle('open', state.mobileNav);
-            document.querySelector('.sidebar')?.classList.toggle('open', state.mobileNav);
+            $q(document, '.sidebar-backdrop')?.classList.toggle('open', state.mobileNav);
+            $q(document, '.sidebar')?.classList.toggle('open', state.mobileNav);
             return;
         }
         if (action === 'theme') {
             state.theme = state.theme === 'dark' ? 'light' : 'dark';
             state.config.theme = state.theme;
             await db.put('config', state.config);
-            const shell = document.querySelector('.app-shell');
+            const shell = $q(document, '.app-shell');
             shell?.classList.toggle('theme-light', state.theme === 'light');
-            const tb = document.querySelector('[data-action=theme]');
+            const tb = $q(document, '[data-action=theme]');
             if (tb)
                 tb.innerHTML = state.theme === 'dark' ? icon('moon', 15) : icon('sun', 15);
             return;
@@ -1637,7 +1643,7 @@ function wire() {
         return;
     } if (t.matches('.inventory-input')) {
         const p = getProduct(t.dataset.product || '');
-        const cell = document.querySelector(`[data-diff="${t.dataset.product}"]`);
+        const cell = $q(document, `[data-diff="${t.dataset.product}"]`);
         if (cell && p && t.value !== '') {
             const diff = Number(t.value) - p.currentStock;
             cell.textContent = (diff > 0 ? '+' : '') + qty(diff);
@@ -1741,11 +1747,11 @@ function schedulePageRender(caret?: number) { if (caret !== undefined)
     }
     pendingQueryCaret = undefined;
 } }); }
-function rebuildNavState() { document.querySelectorAll('.nav-item[data-view]').forEach(el => el.classList.toggle('active', (el as HTMLElement).dataset.view === state.view)); const badge = document.querySelector('.nav-item[data-view="nfe"] .nav-badge'); const pending = state.nfe.filter(n => n.status === 'new' || n.status === 'review').length; if (pending && badge)
+function rebuildNavState() { $qa(document, '.nav-item[data-view]').forEach(el => el.classList.toggle('active', (el as HTMLElement).dataset.view === state.view)); const badge = $q(document, '.nav-item[data-view="nfe"] .nav-badge'); const pending = state.nfe.filter(n => n.status === 'new' || n.status === 'review').length; if (pending && badge)
     badge.textContent = String(pending);
 else if (!pending && badge)
     badge.remove(); }
-function renderPage() { const page = document.querySelector('.page'); if (page)
+function renderPage() { const page = $q(document, '.page'); if (page)
     page.innerHTML = renderView(); rebuildNavState(); }
 function render() { document.getElementById('app').innerHTML = shell(); }
 init().catch(err => { document.getElementById('app').innerHTML = `<div style="padding:40px;font-family:system-ui;color:#fff;background:#0b1118;min-height:100vh"><h1>Não foi possível iniciar</h1><p>${esc(err?.message || err)}</p></div>`; });
