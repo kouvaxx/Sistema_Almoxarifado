@@ -2,6 +2,7 @@ import './styles.css';
 import { db, defaultConfig, loadSnapshot } from './db';
 import { createInitialState } from './state';
 import { analyzeTextDocument, groupWordsIntoLines } from './domain/nfe-parser';
+import { applyImportedItems, normalizedCode } from './domain/nfe-matching';
 import { seedDatabase, tryLegacyMigration } from './app/bootstrap';
 import { CATEGORY_META } from './seed';
 import {
@@ -22,13 +23,13 @@ import type { AuditEntry, Movement, MovementType, NfeDocument, Product, Quote, V
 // A etapa seguinte do roadmap deve separar UI, domínio e persistência sem alterar seu comportamento.
 
 function $id<T extends HTMLElement = HTMLInputElement>(id: string): T | null {
-    return $id(id) as T | null;
+    return document.getElementById(id) as T | null;
 }
 function $q<T extends HTMLElement = HTMLInputElement>(root: ParentNode, selector: string): T | null {
-    return $q(root, selector) as T | null;
+    return root.querySelector(selector) as T | null;
 }
 function $qa<T extends HTMLElement = HTMLInputElement>(root: ParentNode, selector: string): T[] {
-    return Array.from($qa(root, selector)) as T[];
+    return Array.from(root.querySelectorAll(selector)) as T[];
 }
 const APP = 'Almoxarifado v9.2';
 const uid = (prefix = 'id') => `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
@@ -655,36 +656,6 @@ async function searchByPhoto(file) { if (!file.type.startsWith('image/')) {
     hash = await imageDHash(file);
 }
 catch { } const matches = hash ? state.products.filter(p => p.active && p.photoHash).map(p => ({ p, d: hammingHex(hash, p.photoHash) })).sort((a, b) => a.d - b.d).slice(0, 6) : []; const url = URL.createObjectURL(file); const rows = matches.filter(x => x.d <= 22).map(x => { const score = Math.max(0, Math.round(100 - (x.d / 64) * 100)); return `<button class="photo-match" data-product="${x.p.id}"><span class="photo-match-score">${score}%</span><span><b>${esc(x.p.name)}</b><small>${esc(x.p.code)} · ${qty(x.p.currentStock)} ${esc(x.p.unit)}</small></span>${icon('arrow', 14)}</button>`; }).join(''); showModal('Busca por foto', `<div class="photo-search-panel"><img class="photo-search-preview" src="${url}" alt="Foto para busca"/>${rows ? `<div class="modal-subtitle">Correspondências locais</div><div class="photo-match-list">${rows}</div>` : `<div class="empty-state mini"><div class="empty-icon">${icon('search', 25)}</div><b>Nenhuma correspondência local</b><span>Cadastre uma foto de referência no produto para habilitar a comparação visual offline.</span></div>`}<div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Fechar</button><button class="btn btn-primary" data-action="new-product-from-photo">${icon('plus', 15)} Novo produto com esta foto</button></div></div>`); setTimeout(() => URL.revokeObjectURL(url), 30000); }
-function normalizedCode(value) { return value.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^0+/, '') || '0'; }
-function tokenSimilarity(a, b) { const aa = norm(a).split(/\s+/).filter(x => x.length > 1), bb = norm(b).split(/\s+/).filter(x => x.length > 1); if (!aa.length || !bb.length)
-    return 0; const B = new Set(bb), overlap = aa.filter(x => B.has(x)).length, base = overlap / Math.max(aa.length, bb.length); const ca = norm(a).replace(/\s/g, ''), cb = norm(b).replace(/\s/g, ''), max = Math.max(ca.length, cb.length); let same = 0; for (let i = 0; i < Math.min(ca.length, cb.length); i++)
-    if (ca[i] === cb[i])
-        same++; return Math.min(1, base * .72 + (max ? same / max : 0) * .28); }
-function matchImportedItem(item) { const code = String(item.code || '').trim(); if (code && code !== '—') {
-    const exact = productCodeIndex.get(code);
-    if (exact)
-        return { product: exact, confidence: 1, method: 'codigo-exato' };
-    const nc = normalizedCode(code), by = productNormalizedCodeIndex.get(nc) || [];
-    if (nc !== '0' && by.length === 1)
-        return { product: by[0], confidence: .97, method: 'codigo-normalizado' };
-} const exactName = productNameIndex.get(norm(item.description)); if (exactName)
-    return { product: exactName, confidence: .95, method: 'nome-exato' }; let best, bs = 0, second = 0; for (const p of state.products) {
-    const sc = tokenSimilarity(item.description, p.name);
-    if (sc > bs) {
-        second = bs;
-        bs = sc;
-        best = p;
-    }
-    else if (sc > second)
-        second = sc;
-} if (best && bs >= .84 && bs - second >= .08)
-    return { product: best, confidence: bs, method: 'nome-aproximado' }; return { confidence: bs, method: 'sem-match' }; }
-function applyImportedItems(resultItems, nfeId) { return resultItems.map(item => { const m = matchImportedItem(item), ex = item.confidence ?? .5, mc = m.product ? m.confidence : Math.min(.84, m.confidence); let status = 'new'; if (m.product && mc >= .84 && ex >= .62)
-    status = 'update';
-else if (!m.product && ex < .62)
-    status = 'review'; const warnings = [...(item.warnings || [])]; if (!m.product)
-    warnings.push('Produto não localizado no cadastro atual. Será tratado como novo após conferência.'); if (m.product && mc < .95)
-    warnings.push('Correspondência aproximada; confira o cadastro antes de confirmar.'); return { id: uid('nfei'), nfeId, code: item.code || '—', description: item.description, quantity: item.quantity, unit: item.unit || 'un', unitCost: item.unitCost || 0, matchedProductId: m.product?.id, confidence: ex, matchConfidence: mc, matchMethod: m.method, sourceLine: item.sourceLine, warnings, status }; }); }
 async function importTextOrder(text, name) { const result = analyzeTextDocument(text); if (!result.items.length) {
     toast('Nenhum item identificável no pedido. Revise o texto ou use CSV.', 'error');
     return;
