@@ -23,10 +23,10 @@ function $id<T extends HTMLElement = HTMLInputElement>(id: string): T | null {
     return document.getElementById(id) as T | null;
 }
 function $q<T extends HTMLElement = HTMLInputElement>(root: ParentNode, selector: string): T | null {
-    return $q(root, selector) as T | null;
+    return root.querySelector(selector) as T | null;
 }
 function $qa<T extends HTMLElement = HTMLInputElement>(root: ParentNode, selector: string): T[] {
-    return Array.from($qa(root, selector)) as T[];
+    return Array.from(root.querySelectorAll(selector)) as T[];
 }
 const APP = 'Almoxarifado v9.2';
 const uid = (prefix = 'id') => `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
@@ -36,7 +36,7 @@ const qty = (n) => new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 3 }).
 const dateTime = (s) => s ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(s)) : '—';
 const dateOnly = (s) => s ? new Intl.DateTimeFormat('pt-BR').format(new Date(s)) : '—';
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const norm = (v) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const norm = (v: unknown): string => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 const NAV = [
     { id: 'dashboard', label: 'Visão geral', section: 'INÍCIO', icon: 'dashboard' },
     { id: 'products', label: 'Produtos', section: 'CADASTRO', icon: 'box' },
