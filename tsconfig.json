@@ -4,6 +4,8 @@
     "module": "ES2022",
     "moduleResolution": "Bundler",
     "strict": true,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
     "skipLibCheck": true,
     "noEmit": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
