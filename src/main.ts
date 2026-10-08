@@ -9,6 +9,11 @@ import {
   stockStatusClass,
   stockStatusLabel,
 } from './domain/stock';
+import {
+  validateImportedProducts,
+  validateInventoryCount,
+  validateStockMovement,
+} from './domain/validation';
 import type {
   AppConfig,
   AuditEntry,
@@ -452,11 +457,17 @@ async function saveMovement() {
         return;
     }
     const current = product.currentStock;
-    const next = calculateNextStock(current, type, amount);
-    if (next < 0 && !state.config.allowNegativeStock) {
-        toast(`Estoque insuficiente. Disponível: ${qty(current)}.`, 'error');
+    const validation = validateStockMovement({
+        currentStock: current,
+        type,
+        quantity: amount,
+        allowNegativeStock: state.config.allowNegativeStock,
+    });
+    if (!validation.ok) {
+        toast(validation.message, 'error');
         return;
     }
+    const next = validation.nextStock;
     const cost = Math.max(0, Number(document.getElementById('m-cost').value) || product.currentCost);
     if (type === 'entrada' && amount > 0 && cost > 0) {
         product.averageCost = calculateWeightedAverageCost(current, product.averageCost, amount, cost);
@@ -475,27 +486,55 @@ async function saveMovement() {
     toast('Movimentação registrada');
 }
 const typeLabel = movementTypeLabel;
-async function saveInventory() { const inputs = [...document.querySelectorAll('.inventory-input')]; let changes = 0; for (const input of inputs) {
-    if (input.value === '')
-        continue;
-    const p = getProduct(input.dataset.product || '');
-    if (!p)
-        continue;
-    const counted = Number(input.value);
-    if (!Number.isFinite(counted) || counted < 0)
-        continue;
-    if (counted === p.currentStock)
-        continue;
-    const before = p.currentStock;
-    p.currentStock = counted;
-    p.updatedAt = now();
-    const m = { id: uid('mov'), productId: p.id, productCode: p.code, productName: p.name, type: 'ajuste', quantity: Math.abs(counted - before), unitCost: p.currentCost, document: 'INVENTÁRIO', note: `Ajuste de ${qty(before)} para ${qty(counted)}`, createdAt: now() };
-    state.movements.unshift(m);
-    await db.put('movements', m);
-    await db.put('products', p);
-    log('inventory', `Inventário ajustado: ${p.name}`, `${qty(before)} → ${qty(counted)}`, 'product', p.id);
-    changes++;
-} toast(changes ? `${changes} ajustes registrados` : 'Nenhuma diferença para ajustar', changes ? 'success' : 'warning'); renderPage(); }
+async function saveInventory() {
+    const inputs = [...document.querySelectorAll('.inventory-input')];
+    const changes = [];
+
+    for (const input of inputs) {
+        if (input.value === '') continue;
+
+        const product = getProduct(input.dataset.product || '');
+        if (!product) continue;
+
+        const counted = Number(input.value);
+        if (!validateInventoryCount(counted)) {
+            toast(`Contagem inválida para ${product.name}.`, 'error');
+            return;
+        }
+
+        if (counted === product.currentStock) continue;
+
+        changes.push({ product, counted });
+    }
+
+    for (const { product, counted } of changes) {
+        const before = product.currentStock;
+        product.currentStock = counted;
+        product.updatedAt = now();
+
+        const movement = {
+            id: uid('mov'),
+            productId: product.id,
+            productCode: product.code,
+            productName: product.name,
+            type: 'ajuste',
+            quantity: Math.abs(counted - before),
+            unitCost: product.currentCost,
+            document: 'INVENTÁRIO',
+            note: `Ajuste de ${qty(before)} para ${qty(counted)}`,
+            createdAt: now(),
+        };
+
+        state.movements.unshift(movement);
+        await db.put('movements', movement);
+        await db.put('products', product);
+        log('inventory', `Inventário ajustado: ${product.name}`, `${qty(before)} → ${qty(counted)}`, 'product', product.id);
+    }
+
+    const count = changes.length;
+    toast(count ? `${count} ajustes registrados` : 'Nenhuma diferença para ajustar', count ? 'success' : 'warning');
+    renderPage();
+}
 async function saveQuote() { const cart = (window._quoteCart?.() ?? []); const q = { id: uid('quote'), number: `ORC-${new Date().getFullYear()}-${String(state.quotes.length + 1).padStart(4, '0')}`, customer: document.getElementById('q-customer').value.trim(), title: document.getElementById('q-title').value.trim() || 'Orçamento', validUntil: document.getElementById('q-valid').value || undefined, status: 'draft', notes: document.getElementById('q-notes').value.trim(), items: cart, createdAt: now(), updatedAt: now() }; state.quotes.unshift(q); await db.put('quotes', q); log('create', `Orçamento criado: ${q.number}`, `${q.items.length} itens · ${money(quoteTotal(q))}`, 'quote', q.id); closeModal(); renderPage(); toast('Orçamento salvo'); }
 function openNfeDetail(nfeId) { const n = state.nfe.find(x => x.id === nfeId); if (!n)
     return; const items = state.nfeItems.filter(i => i.nfeId === n.id); const profile = n.readerProfile === 'danfe' ? 'DANFE' : n.readerProfile === 'pedido' ? 'Pedido' : n.readerProfile === 'orcamento' ? 'Orçamento' : n.readerProfile === 'generic' ? 'Documento genérico' : 'Não identificado'; const review = items.filter(i => i.status === 'review').length; const canProcess = n.status !== 'processed' && n.status !== 'cancelled' && items.length > 0; const footer = `<div class="modal-actions nfe-modal-actions"><button class="btn btn-secondary" data-action="close-modal">Fechar</button>${n.status === 'cancelled' ? `<button class="btn btn-secondary" data-action="reopen-nfe" data-id="${n.id}">${icon('refresh', 15)} Reabrir revisão</button>` : n.status !== 'processed' ? `<button class="btn btn-danger ghost" data-action="delete-nfe" data-id="${n.id}">${icon('trash', 15)} Excluir nota</button><button class="btn btn-secondary" data-action="cancel-nfe" data-id="${n.id}">${icon('close', 15)} Cancelar revisão</button>` : ''}${canProcess ? `<button class="btn btn-primary" data-action="process-nfe" data-id="${n.id}">${icon('check', 15)} Confirmar entrada</button>` : ''}</div>`; showModal('Revisar documento', `<div class="detail-grid"><div><span>Status</span><b>${esc(n.status)}</b></div><div><span>Leitura</span><b>${esc(profile)}${n.readerConfidence ? ` · ${Math.round(n.readerConfidence * 100)}%` : ''}</b></div><div><span>Fornecedor</span><b>${esc(n.supplierName || '—')}</b></div><div><span>Número</span><b>${esc(n.number || '—')}</b></div><div><span>Itens</span><b>${items.length}</b></div><div><span>Revisão</span><b>${review ? review + ' item(ns)' : 'Nenhum item pendente'}</b></div></div>${n.parseWarnings?.length ? `<div class="data-note"><span>${icon('alert', 17)}</span><p><b>Alertas</b><br/>${n.parseWarnings.map(w => esc(w)).join('<br/>')}</p></div>` : ''}<div class="data-note"><span>${icon('file', 17)}</span><p><b>${esc(n.sourceName)}</b><br/>${esc(n.note || 'Documento pronto para conferência.')}</p></div>${items.length ? `<div class="modal-subtitle">Itens reconhecidos</div><div class="table-wrap mini-table"><table><thead><tr><th>Item</th><th>Código</th><th>Qtd.</th><th>Unit.</th><th>Confiança</th><th>Correspondência</th><th>Ação</th></tr></thead><tbody>${items.map(i => { const conf = Math.round((i.confidence ?? 0) * 100), m = Math.round((i.matchConfidence ?? 0) * 100), p = i.matchedProductId ? getProduct(i.matchedProductId) : undefined; const cls = conf >= 80 ? 'status-ok' : conf >= 60 ? 'status-low' : 'status-critical'; return `<tr><td><b>${esc(i.description)}</b><small>${i.warnings?.[0] ? esc(i.warnings[0]) : esc(i.sourceLine || '')}</small></td><td>${esc(i.code || '—')}</td><td>${qty(i.quantity)} ${esc(i.unit)}</td><td>${money(i.unitCost)}</td><td><span class="status ${cls}"><i></i>${conf}%</span></td><td><span class="status ${p ? 'status-ok' : 'status-low'}"><i></i>${p ? esc(p.name) : 'Novo'}${m ? ` · ${m}%` : ''}</span></td><td><span class="status ${i.status === 'review' ? 'status-low' : i.status === 'skip' ? 'status-critical' : 'status-ok'}"><i></i>${i.status === 'review' ? 'Revisar' : i.status === 'skip' ? 'Ignorado' : i.status === 'new' ? 'Novo' : 'Pronto'}</span></td></tr>`; }).join('')}</tbody></table></div>` : ''}${footer}`); }
@@ -1080,36 +1119,99 @@ async function importCsv(text, name) {
         toast('CSV vazio', 'error');
         return;
     }
+
     const headers = lines[0].split(';').map(x => norm(x));
     const idx = (...names) => headers.findIndex(h => names.some(n => h.includes(n)));
-    const iCode = idx('codigo', 'id', 'sku'), iName = idx('produto', 'nome', 'descricao'), iQty = idx('quantidade', 'qtd'), iUnit = idx('unidade', 'un'), iCost = idx('preco', 'custo', 'valor');
-    const n = { id: uid('nfe'), sourceName: name, sourceType: 'csv', status: 'new', createdAt: now(), note: `${lines.length - 1} linhas importadas` };
+    const iCode = idx('codigo', 'id', 'sku');
+    const iName = idx('produto', 'nome', 'descricao');
+    const iQty = idx('quantidade', 'qtd');
+    const iUnit = idx('unidade', 'un');
+    const iCost = idx('preco', 'custo', 'valor');
+
+    const candidates = [];
+    for (const [offset, line] of lines.slice(1).entries()) {
+        const cells = line.split(';');
+        const nameValue = (cells[iName] || '').trim();
+        if (!nameValue) continue;
+
+        candidates.push({
+            code: (cells[iCode] || '').trim() || '—',
+            name: nameValue,
+            unit: (cells[iUnit] || '').trim() || 'un',
+            categoryName: 'Outros',
+            currentStock: Math.max(0, Number((cells[iQty] || '0').replace(',', '.')) || 0),
+            minimumStock: 0,
+            currentCost: Math.max(0, Number((cells[iCost] || '0').replace('.', '').replace(',', '.')) || 0),
+            averageCost: Math.max(0, Number((cells[iCost] || '0').replace('.', '').replace(',', '.')) || 0),
+            supplierName: undefined,
+            __csvRow: offset + 2,
+        });
+    }
+
+    const validation = validateImportedProducts(candidates);
+    if (!validation.ok) {
+        toast(`CSV rejeitado: ${validation.errors.length} linha(s) inválida(s).`, 'error');
+        return;
+    }
+
+    const n = {
+        id: uid('nfe'),
+        sourceName: name,
+        sourceType: 'csv',
+        status: 'new',
+        createdAt: now(),
+        note: `${validation.products.length} linhas importadas`,
+    };
+
     await db.put('nfe', n);
     state.nfe.unshift(n);
+
     let applied = 0;
-    for (const line of lines.slice(1)) {
-        const cells = line.split(';');
-        const code = (cells[iCode] || '').trim();
-        const nameValue = (cells[iName] || '').trim().toUpperCase();
-        const amount = Math.max(0, Number((cells[iQty] || '0').replace(',', '.')) || 0);
-        const cost = Math.max(0, Number((cells[iCost] || '0').replace('.', '').replace(',', '.')) || 0);
-        if (!nameValue)
-            continue;
-        let p = state.products.find(x => (code && x.code === code) || norm(x.name) === norm(nameValue));
-        if (p) {
-            p.currentCost = cost || p.currentCost;
-            p.currentStock += amount;
-            p.averageCost = p.averageCost ? p.averageCost : cost;
-            p.updatedAt = now();
-            await db.put('products', p);
-            if (amount > 0) {
-                const m = { id: uid('mov'), productId: p.id, productCode: p.code, productName: p.name, type: 'entrada', quantity: amount, unitCost: cost || p.currentCost, document: name, createdAt: now() };
-                state.movements.unshift(m);
-                await db.put('movements', m);
+    for (const raw of validation.products) {
+        const p = state.products.find(x => (raw.code !== '—' && x.code === raw.code) || norm(x.name) === norm(raw.name));
+        if (!p) continue;
+
+        if (raw.currentStock > 0) {
+            const stockCheck = validateStockMovement({
+                currentStock: p.currentStock,
+                type: 'entrada',
+                quantity: raw.currentStock,
+                allowNegativeStock: state.config.allowNegativeStock,
+            });
+            if (!stockCheck.ok) {
+                n.status = 'error';
+                n.note = stockCheck.message;
+                await db.put('nfe', n);
+                toast(`Importação interrompida: ${stockCheck.message}`, 'error');
+                return;
             }
-            applied++;
         }
+
+        const cost = raw.currentCost || p.currentCost;
+        p.currentCost = cost;
+        p.currentStock = p.currentStock + raw.currentStock;
+        p.averageCost = p.averageCost ? p.averageCost : raw.averageCost;
+        p.updatedAt = now();
+        await db.put('products', p);
+
+        if (raw.currentStock > 0) {
+            const movement = {
+                id: uid('mov'),
+                productId: p.id,
+                productCode: p.code,
+                productName: p.name,
+                type: 'entrada',
+                quantity: raw.currentStock,
+                unitCost: cost,
+                document: name,
+                createdAt: now(),
+            };
+            state.movements.unshift(movement);
+            await db.put('movements', movement);
+        }
+        applied++;
     }
+
     n.status = 'processed';
     await db.put('nfe', n);
     log('import', `CSV processado: ${name}`, `${applied} produtos atualizados`, 'nfe', n.id);
@@ -1117,51 +1219,103 @@ async function importCsv(text, name) {
     renderPage();
 }
 async function importSnapshot(parsed, name) {
-    let products = Array.isArray(parsed) ? parsed : Array.isArray(parsed.products) ? parsed.products : Array.isArray(parsed.produtos) ? parsed.produtos : [];
-    if (!products.length) {
+    const rawProducts = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed.products)
+            ? parsed.products
+            : Array.isArray(parsed.produtos)
+                ? parsed.produtos
+                : [];
+
+    if (!rawProducts.length) {
         toast('Backup sem produtos', 'error');
         return;
     }
-    const ok = confirm(`Importar ${products.length} produtos do arquivo “${name}”?\n\nOK = mesclar\nCancelar = abortar`);
-    if (!ok)
+
+    const validation = validateImportedProducts(rawProducts);
+    if (!validation.ok) {
+        toast(`Backup rejeitado: ${validation.errors.length} registro(s) inválido(s).`, 'error');
         return;
-    let created = 0, updated = 0;
-    for (const raw of products) {
-        const code = String(raw.code ?? raw.id ?? '—').trim();
-        const nameValue = String(raw.name ?? raw.nome ?? '').trim().toUpperCase();
-        if (!nameValue)
-            continue;
+    }
+
+    const ok = confirm(`Importar ${validation.products.length} produtos do arquivo “${name}”?\\n\\nOK = mesclar\\nCancelar = abortar`);
+    if (!ok) return;
+
+    let created = 0;
+    let updated = 0;
+
+    for (const raw of validation.products) {
+        const code = raw.code.trim();
+        const nameValue = raw.name.trim().toUpperCase();
         const found = state.products.find(p => p.code === code && norm(p.name) === norm(nameValue));
+
         if (found) {
-            Object.assign(found, { currentCost: Number(raw.currentCost ?? raw.preco) || found.currentCost, averageCost: Number(raw.averageCost ?? raw.preco) || found.averageCost, currentStock: Number(raw.currentStock ?? raw.estoqueAtual ?? raw.quantidade) || 0, minimumStock: Number(raw.minimumStock ?? 2) });
+            Object.assign(found, {
+                currentCost: raw.currentCost || found.currentCost,
+                averageCost: raw.averageCost || found.averageCost,
+                currentStock: raw.currentStock,
+                minimumStock: raw.minimumStock,
+            });
             await db.put('products', found);
             updated++;
+            continue;
         }
-        else {
-            const catName = String(raw.categoryName ?? raw.categoria ?? 'Outros');
-            let cat = state.categories.find(c => c.name === catName);
-            if (!cat) {
-                cat = { id: uid('cat'), name: catName, icon: CATEGORY_META[catName]?.icon ?? 'Lista', tone: CATEGORY_META[catName]?.tone ?? 'slate' };
-                state.categories.push(cat);
-                await db.put('categories', cat);
-            }
-            const supplierName = String(raw.supplierNameLegacy ?? raw.supplier ?? raw.fornecedor ?? '').trim();
-            let supplierId;
-            if (supplierName && supplierName !== '?' && supplierName !== '—') {
-                let supplier = state.suppliers.find(x => x.name === supplierName);
-                if (!supplier) {
-                    supplier = { id: uid('sup'), name: supplierName, active: true, createdAt: now(), updatedAt: now() };
-                    state.suppliers.push(supplier);
-                    await db.put('suppliers', supplier);
-                }
-                supplierId = supplier.id;
-            }
-            const p = { id: uid('p'), code, name: nameValue, supplierId, supplierNameLegacy: supplierName, categoryId: cat.id, unit: String(raw.unit ?? raw.unidade ?? 'un'), currentStock: Number(raw.currentStock ?? raw.estoqueAtual ?? raw.quantidade) || 0, minimumStock: Number(raw.minimumStock ?? 2), reservedStock: 0, currentCost: Number(raw.currentCost ?? raw.preco) || 0, averageCost: Number(raw.averageCost ?? raw.preco) || 0, active: true, createdAt: now(), updatedAt: now(), legacySource: 'v8-import' };
-            state.products.push(p);
-            await db.put('products', p);
-            created++;
+
+        const catName = raw.categoryName;
+        let cat = state.categories.find(c => c.name === catName);
+        if (!cat) {
+            cat = {
+                id: uid('cat'),
+                name: catName,
+                icon: CATEGORY_META[catName]?.icon ?? 'Lista',
+                tone: CATEGORY_META[catName]?.tone ?? 'slate',
+            };
+            state.categories.push(cat);
+            await db.put('categories', cat);
         }
+
+        const supplierName = raw.supplierName?.trim() || '';
+        let supplierId;
+        if (supplierName && supplierName !== '?' && supplierName !== '—') {
+            let supplier = state.suppliers.find(x => x.name === supplierName);
+            if (!supplier) {
+                supplier = {
+                    id: uid('sup'),
+                    name: supplierName,
+                    active: true,
+                    createdAt: now(),
+                    updatedAt: now(),
+                };
+                state.suppliers.push(supplier);
+                await db.put('suppliers', supplier);
+            }
+            supplierId = supplier.id;
+        }
+
+        const product = {
+            id: uid('p'),
+            code,
+            name: nameValue,
+            supplierId,
+            supplierNameLegacy: supplierName,
+            categoryId: cat.id,
+            unit: raw.unit,
+            currentStock: raw.currentStock,
+            minimumStock: raw.minimumStock,
+            reservedStock: 0,
+            currentCost: raw.currentCost,
+            averageCost: raw.averageCost,
+            active: true,
+            createdAt: now(),
+            updatedAt: now(),
+            legacySource: 'v8-import',
+        };
+
+        state.products.push(product);
+        await db.put('products', product);
+        created++;
     }
+
     rebuildIndexes();
     log('import', `Backup importado: ${name}`, `${created} novos · ${updated} atualizados`);
     toast(`Importação concluída: ${created} novos · ${updated} atualizados`);
