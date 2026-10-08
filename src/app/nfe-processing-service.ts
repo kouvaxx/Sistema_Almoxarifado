@@ -34,6 +34,7 @@ export interface ProcessNfeInput {
 export interface ProcessNfeResult {
   nfe: NfeDocument;
   updatedItems: NfeItem[];
+  changedProducts: Product[];
   createdProducts: Product[];
   createdSuppliers: Supplier[];
   movements: Movement[];
@@ -71,23 +72,38 @@ export async function processNfeDocument(
     return { message: 'Nenhum item selecionado para entrada.' };
   }
 
+  const workingSuppliers = [...suppliers];
+  const workingProducts = new Map<string, Product>();
+  const changedItems = new Map<string, NfeItem>();
+  const changedProducts = new Map<string, Product>();
   const createdProducts: Product[] = [];
   const createdSuppliers: Supplier[] = [];
   const movements: Movement[] = [];
-  const updatedItems: NfeItem[] = [];
   let createdProductCount = 0;
   let updatedProductCount = 0;
 
-  for (const item of processableItems) {
-    let product = item.matchedProductId
-      ? products.find(candidate => candidate.id === item.matchedProductId)
+  const findProduct = (id: string): Product | undefined =>
+    workingProducts.get(id) ?? products.find(product => product.id === id);
+
+  for (const sourceItem of processableItems) {
+    let product = sourceItem.matchedProductId
+      ? findProduct(sourceItem.matchedProductId)
       : undefined;
 
-    if (!product && item.status === 'new') {
+    let workingItem = changedItems.get(sourceItem.id);
+
+    if (!workingItem) {
+      workingItem = {
+        ...sourceItem,
+        warnings: sourceItem.warnings ? [...sourceItem.warnings] : undefined,
+      };
+    }
+
+    if (!product && sourceItem.status === 'new') {
       let supplierId: string | undefined;
 
       if (nfe.supplierName) {
-        let supplier = suppliers.find(candidate =>
+        let supplier = workingSuppliers.find(candidate =>
           norm(candidate.name) === norm(nfe.supplierName),
         );
 
@@ -99,9 +115,8 @@ export async function processNfeDocument(
             createdAt: now(),
             updatedAt: now(),
           };
+          workingSuppliers.push(supplier);
           createdSuppliers.push(supplier);
-          suppliers.push(supplier);
-          await repository.saveSupplier(supplier);
         }
 
         supplierId = supplier.id;
@@ -113,27 +128,28 @@ export async function processNfeDocument(
 
       product = {
         id: uid('p'),
-        code: item.code || '—',
-        name: item.description.toUpperCase(),
+        code: sourceItem.code || '—',
+        name: sourceItem.description.toUpperCase(),
         supplierId,
         supplierNameLegacy: nfe.supplierName || '',
         categoryId: category?.id || '',
-        unit: item.unit || 'un',
+        unit: sourceItem.unit || 'un',
         currentStock: 0,
         minimumStock: config.defaultMinimumStock,
         reservedStock: 0,
-        currentCost: item.unitCost || 0,
-        averageCost: item.unitCost || 0,
+        currentCost: sourceItem.unitCost || 0,
+        averageCost: sourceItem.unitCost || 0,
         active: true,
         createdAt: now(),
         updatedAt: now(),
         legacySource: 'manual',
       };
 
+      workingProducts.set(product.id, product);
+      changedProducts.set(product.id, product);
       createdProducts.push(product);
-      products.unshift(product);
-      item.matchedProductId = product.id;
-      await repository.saveProduct(product);
+      workingItem.matchedProductId = product.id;
+      changedItems.set(workingItem.id, workingItem);
       createdProductCount++;
     }
 
@@ -141,54 +157,68 @@ export async function processNfeDocument(
       continue;
     }
 
-    const amount = Math.max(0, item.quantity || 0);
-    const cost = item.unitCost || product.currentCost;
-    const current = product.currentStock;
+    const amount = Math.max(0, sourceItem.quantity || 0);
+    const cost = sourceItem.unitCost || product.currentCost;
 
     if (amount > 0) {
-      product.averageCost = calculateWeightedAverageCost(
-        current,
-        product.averageCost,
-        amount,
-        cost,
-      );
-      product.currentCost = cost;
-      product.currentStock = current + amount;
-      product.lastPurchaseAt = nfe.issueDate || now();
-      product.updatedAt = now();
+      const updatedProduct: Product = {
+        ...product,
+        averageCost: calculateWeightedAverageCost(
+          product.currentStock,
+          product.averageCost,
+          amount,
+          cost,
+        ),
+        currentCost: cost,
+        currentStock: product.currentStock + amount,
+        lastPurchaseAt: nfe.issueDate || now(),
+        updatedAt: now(),
+      };
 
-      await repository.saveProduct(product);
+      workingProducts.set(updatedProduct.id, updatedProduct);
+      changedProducts.set(updatedProduct.id, updatedProduct);
 
       const movement: Movement = {
         id: uid('mov'),
-        productId: product.id,
-        productCode: product.code,
-        productName: product.name,
+        productId: updatedProduct.id,
+        productCode: updatedProduct.code,
+        productName: updatedProduct.name,
         type: 'entrada',
         quantity: amount,
         unitCost: cost,
         document: nfe.number || nfe.key || nfe.sourceName,
-        note: `Importação inteligente · ${nfe.readerProfile || 'documento'} · ${item.matchMethod || 'sem-match'}`,
+        note: `Importação inteligente · ${nfe.readerProfile || 'documento'} · ${sourceItem.matchMethod || 'sem-match'}`,
         createdAt: now(),
       };
 
       movements.push(movement);
-      await repository.saveMovement(movement);
-
-      item.status = 'update';
-      updatedItems.push(item);
-      await repository.saveNfeItem(item);
+      workingItem.status = 'update';
+      changedItems.set(workingItem.id, workingItem);
       updatedProductCount++;
     }
   }
 
-  nfe.status = 'processed';
-  nfe.note = `Processado: ${updatedProductCount} movimentos · ${createdProductCount} novos produtos.`;
-  await repository.saveNfe(nfe);
+  const processedNfe: NfeDocument = {
+    ...nfe,
+    status: 'processed',
+    note: `Processado: ${updatedProductCount} movimentos · ${createdProductCount} novos produtos.`,
+  };
+
+  const updatedItems = [...changedItems.values()];
+  const changedProductList = [...changedProducts.values()];
+
+  await repository.saveNfeProcessing({
+    nfe: processedNfe,
+    suppliers: createdSuppliers,
+    products: changedProductList,
+    movements,
+    nfeItems: updatedItems,
+  });
 
   return {
-    nfe,
+    nfe: processedNfe,
     updatedItems,
+    changedProducts: changedProductList,
     createdProducts,
     createdSuppliers,
     movements,
