@@ -3,7 +3,7 @@ import { db, defaultConfig, loadSnapshot } from './db';
 import { createInitialState } from './state';
 import { analyzeTextDocument, groupWordsIntoLines } from './domain/nfe-parser';
 import { seedDatabase, tryLegacyMigration } from './app/bootstrap';
-import { CATEGORY_META, SEED_CATEGORIES, SEED_PRODUCTS, SEED_SUPPLIERS } from './seed';
+import { CATEGORY_META } from './seed';
 import {
   calculateWeightedAverageCost,
   getStockStatus,
