@@ -7,6 +7,7 @@ import { imageDHash, normalizedPhotoCode, searchPhoto } from './app/photo-search
 import { seedDatabase, tryLegacyMigration } from './app/bootstrap';
 import { nfePdfReader } from './app/nfe-pdf-reader';
 import { dispatchImport } from './app/import-service';
+import { registerStockMovement } from './app/stock-service';
 import { CATEGORY_META } from './seed';
 import {
   calculateWeightedAverageCost,
@@ -400,37 +401,41 @@ async function saveMovement() {
         toast('Produto inválido', 'error');
         return;
     }
+
     const type = $id('m-type').value as MovementType;
     const amount = Math.max(0, Number($id('m-qty').value) || 0);
     if (!(amount > 0)) {
         toast('Informe uma quantidade válida', 'error');
         return;
     }
-    const current = product.currentStock;
-    const validation = validateStockMovement({
-        currentStock: current,
+
+    const cost = Math.max(0, Number($id('m-cost').value) || product.currentCost);
+    const result = await registerStockMovement({
+        product,
         type,
         quantity: amount,
-        allowNegativeStock: state.config.allowNegativeStock,
+        unitCost: cost,
+        document: $id('m-doc').value.trim(),
+        responsible: $id('m-resp').value.trim(),
+        workOrder: $id('m-os').value.trim(),
+        vehicle: $id('m-vehicle').value.trim(),
+        note: $id('m-note').value.trim(),
+        config: state.config,
     });
-    if (!validation.ok) {
-        toast('message' in validation ? validation.message : 'Movimentação inválida.', 'error');
+
+    if ('message' in result) {
+        toast(result.message, 'error');
         return;
     }
-    const next = validation.nextStock;
-    const cost = Math.max(0, Number($id('m-cost').value) || product.currentCost);
-    if (type === 'entrada' && amount > 0 && cost > 0) {
-        product.averageCost = calculateWeightedAverageCost(current, product.averageCost, amount, cost);
-        product.currentCost = cost;
-        product.lastPurchaseAt = now();
-    }
-    product.currentStock = next;
-    product.updatedAt = now();
-    const m: Movement = { id: uid('mov'), productId: product.id, productCode: product.code, productName: product.name, type, quantity: amount, unitCost: cost, document: $id('m-doc').value.trim(), responsible: $id('m-resp').value.trim(), workOrder: $id('m-os').value.trim(), vehicle: $id('m-vehicle').value.trim(), note: $id('m-note').value.trim(), createdAt: now() };
-    state.movements.unshift(m);
-    await repository.saveMovement(m);
-    await repository.saveProduct(product);
-    log('movement', `${typeLabel(type)} · ${product.name}`, `${type === 'ajuste' ? 'Saldo final: ' + qty(next) : 'Quantidade: ' + qty(amount)} · Documento: ${m.document || '—'}`, 'movement', m.id);
+
+    state.movements.unshift(result.movement);
+    log(
+        'movement',
+        `${typeLabel(type)} · ${product.name}`,
+        `${type === 'ajuste' ? 'Saldo final: ' + qty(result.nextStock) : 'Quantidade: ' + qty(amount)} · Documento: ${result.movement.document || '—'}`,
+        'movement',
+        result.movement.id,
+    );
     closeModal();
     renderPage();
     toast('Movimentação registrada');
