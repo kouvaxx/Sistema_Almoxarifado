@@ -1,8 +1,9 @@
 import './styles.css';
 import { db, defaultConfig, loadSnapshot } from './db';
 import { createInitialState } from './state';
-import { analyzeTextDocument, groupWordsIntoLines } from './domain/nfe-parser';
-import { applyImportedItems, normalizedCode } from './domain/nfe-matching';
+import { analyzeTextDocument } from './domain/nfe-parser';
+import { applyImportedItems } from './domain/nfe-matching';
+import { normalizedPhotoCode, searchPhoto } from './app/photo-search';
 import { seedDatabase, tryLegacyMigration } from './app/bootstrap';
 import { nfePdfReader } from './app/nfe-pdf-reader';
 import { CATEGORY_META } from './seed';
@@ -557,66 +558,18 @@ function lookupCode() { const code = $id('scan-code')?.value.trim(); if (!code)
     return;
 } closeModal(); openProductDrawer(p.id); }
 async function parsePdfMetadata(file: File) { return nfePdfReader.read(file); }
-async function imageDHash(blob) { const w = 9, h = 8; const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; const ctx = canvas.getContext('2d', { willReadFrequently: true }); if (!ctx)
-    throw new Error('Canvas não disponível'); const url = URL.createObjectURL(blob); try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => { const el = new Image(); el.onload = () => resolve(el); el.onerror = () => reject(new Error('Imagem inválida.')); el.src = url; });
-    ctx.drawImage(img, 0, 0, w, h);
-    const data = ctx.getImageData(0, 0, w, h).data;
-    let bits = '';
-    for (let y = 0; y < h; y++) {
-        for (let x = 0; x < 8; x++) {
-            const i = (y * w + x) * 4, j = (y * w + x + 1) * 4, a = .299 * data[i] + .587 * data[i + 1] + .114 * data[i + 2], b = .299 * data[j] + .587 * data[j + 1] + .114 * data[j + 2];
-            bits += a > b ? '1' : '0';
-        }
-    }
-    let hex = '';
-    for (let i = 0; i < 64; i += 4)
-        hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
-    return hex;
-}
-finally {
-    URL.revokeObjectURL(url);
-} }
-function hammingHex(a, b) { if (!a || !b)
-    return 99; let d = 0; for (let i = 0; i < Math.min(a.length, b.length); i++) {
-    let x = parseInt(a[i], 16) ^ parseInt(b[i], 16);
-    while (x) {
-        d += x & 1;
-        x >>= 1;
-    }
-} return d + Math.abs(a.length - b.length) * 4; }
-async function detectBarcodeFromImage(blob) { try {
-    const Detector = globalThis.BarcodeDetector;
-    if (!Detector)
-        return;
-    const detector = new Detector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code', 'data_matrix'] });
-    const bitmap = await createImageBitmap(blob);
-    try {
-        const codes = await detector.detect(bitmap);
-        return codes?.[0]?.rawValue ? String(codes[0].rawValue) : undefined;
-    }
-    finally {
-        bitmap.close?.();
-    }
-}
-catch {
-    return undefined;
-} }
-async function searchByPhoto(file) { if (!file.type.startsWith('image/')) {
+async async function searchByPhoto(file) { if (!file.type.startsWith('image/')) {
     toast('Selecione uma imagem.', 'warning');
     return;
-} photoSearchFile = file; pendingPhotoFile = undefined; let code = await detectBarcodeFromImage(file); if (code) {
-    const p = productCodeIndex.get(code) ?? state.products.find(x => normalizedCode(x.code) === normalizedCode(code) || x.code === code);
+} photoSearchFile = file; pendingPhotoFile = undefined; const { barcode, matches } = await searchPhoto(file, state.products); if (barcode) {
+    const p = productCodeIndex.get(barcode) ?? state.products.find(x => normalizedPhotoCode(x.code) === normalizedPhotoCode(barcode) || x.code === barcode);
     if (p) {
         closeModal();
         openProductDrawer(p.id);
-        toast(`Produto localizado pelo código ${code}`);
+        toast(`Produto localizado pelo código ${barcode}`);
         return;
     }
-} let hash; try {
-    hash = await imageDHash(file);
-}
-catch { } const matches = hash ? state.products.filter(p => p.active && p.photoHash).map(p => ({ p, d: hammingHex(hash, p.photoHash) })).sort((a, b) => a.d - b.d).slice(0, 6) : []; const url = URL.createObjectURL(file); const rows = matches.filter(x => x.d <= 22).map(x => { const score = Math.max(0, Math.round(100 - (x.d / 64) * 100)); return `<button class="photo-match" data-product="${x.p.id}"><span class="photo-match-score">${score}%</span><span><b>${esc(x.p.name)}</b><small>${esc(x.p.code)} · ${qty(x.p.currentStock)} ${esc(x.p.unit)}</small></span>${icon('arrow', 14)}</button>`; }).join(''); showModal('Busca por foto', `<div class="photo-search-panel"><img class="photo-search-preview" src="${url}" alt="Foto para busca"/>${rows ? `<div class="modal-subtitle">Correspondências locais</div><div class="photo-match-list">${rows}</div>` : `<div class="empty-state mini"><div class="empty-icon">${icon('search', 25)}</div><b>Nenhuma correspondência local</b><span>Cadastre uma foto de referência no produto para habilitar a comparação visual offline.</span></div>`}<div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Fechar</button><button class="btn btn-primary" data-action="new-product-from-photo">${icon('plus', 15)} Novo produto com esta foto</button></div></div>`); setTimeout(() => URL.revokeObjectURL(url), 30000); }
+} const url = URL.createObjectURL(file); const rows = matches.filter(x => x.distance <= 22).map(x => { const score = Math.max(0, Math.round(100 - (x.distance / 64) * 100)); return `<button class="photo-match" data-product="${x.product.id}"><span class="photo-match-score">${score}%</span><span><b>${esc(x.product.name)}</b><small>${esc(x.product.code)} · ${qty(x.product.currentStock)} ${esc(x.product.unit)}</small></span>${icon('arrow', 14)}</button>`; }).join(''); showModal('Busca por foto', `<div class="photo-search-panel"><img class="photo-search-preview" src="${url}" alt="Foto para busca"/>${rows ? `<div class="modal-subtitle">Correspondências locais</div><div class="photo-match-list">${rows}</div>` : `<div class="empty-state mini"><div class="empty-icon">${icon('search', 25)}</div><b>Nenhuma correspondência local</b><span>Cadastre uma foto de referência no produto para habilitar a comparação visual offline.</span></div>`}<div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Fechar</button><button class="btn btn-primary" data-action="new-product-from-photo">${icon('plus', 15)} Novo produto com esta foto</button></div></div>`); setTimeout(() => URL.revokeObjectURL(url), 30000); }
 async function importTextOrder(text, name) { const result = analyzeTextDocument(text); if (!result.items.length) {
     toast('Nenhum item identificável no pedido. Revise o texto ou use CSV.', 'error');
     return;
