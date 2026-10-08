@@ -14,7 +14,7 @@ import {
   validateInventoryCount,
   validateStockMovement,
 } from './domain/validation';
-import type { AuditEntry, Movement, MovementType, NfeDocument, Product, Quote } from './types';
+import type { AuditEntry, Movement, MovementType, NfeDocument, Product, Quote, View } from './types';
 
 // A implementação abaixo foi restaurada a partir da versão funcional v9.2 autocontida.
 // A etapa seguinte do roadmap deve separar UI, domínio e persistência sem alterar seu comportamento.
@@ -913,7 +913,7 @@ function extractMetadata(rawText) {
     }
     return { number, key, cnpj, issueDate, total, supplierName };
 }
-function analyzeTextDocument(rawText, explicitProfile) {
+function analyzeTextDocument(rawText, explicitProfile?: 'danfe' | 'pedido' | 'orcamento' | 'generic') {
     const normalized = rawText.replace(/\r/g, '').replace(/[\u00A0\t]+/g, ' ');
     const lines = normalized.split('\n').map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
     const profileInfo = explicitProfile ? { profile: explicitProfile, confidence: 1 } : detectProfile(normalized, lines);
@@ -1207,7 +1207,7 @@ async function importCsv(text, name) {
             });
             if (!stockCheck.ok) {
                 n.status = 'error';
-                n.note = stockCheck.message;
+                n.note = 'message' in stockCheck ? stockCheck.message : 'Saldo inválido.';
                 await db.put('nfe', n);
                 toast(`Importação interrompida: ${'message' in stockCheck ? stockCheck.message : 'Saldo inválido.'}`, 'error');
                 return;
@@ -1425,7 +1425,7 @@ function wire() {
         const v = t.closest('[data-view]');
         if (v) {
             closeModal();
-            state.view = v.dataset.view;
+            state.view = v.dataset.view as View;
             state.mobileNav = false;
             renderPage();
             return;
@@ -1466,7 +1466,7 @@ function wire() {
         const action = a.dataset.action;
         if (NAV.some(n => n.id === action)) {
             closeModal();
-            state.view = action;
+            state.view = action as View;
             state.mobileNav = false;
             renderPage();
             return;
