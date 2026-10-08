@@ -169,6 +169,10 @@ class LocalDB {
     if (!this.db) throw new Error('Banco não inicializado.');
     return this.db;
   }
+  async readyForTransaction(): Promise<IDBDatabase> {
+    return this.ready();
+  }
+
 
   async getAll<T>(store: StoreName): Promise<T[]> {
     const db = await this.ready();
@@ -272,6 +276,21 @@ export async function loadSnapshot(): Promise<DatabaseSnapshot> {
 }
 
 export async function replaceSnapshot(snapshot: DatabaseSnapshot): Promise<void> {
+  const dbInstance = await db.readyForTransaction();
+  const stores: StoreName[] = [
+    'products',
+    'suppliers',
+    'categories',
+    'movements',
+    'nfe',
+    'nfeItems',
+    'quotes',
+    'audit',
+    'config',
+    'productMedia',
+    'nfeFiles',
+  ];
+
   const sets: Array<[StoreName, any[]]> = [
     ['products', snapshot.products],
     ['suppliers', snapshot.suppliers],
@@ -282,12 +301,31 @@ export async function replaceSnapshot(snapshot: DatabaseSnapshot): Promise<void>
     ['quotes', snapshot.quotes],
     ['audit', snapshot.audit],
     ['config', [{ ...snapshot.config, schemaVersion: DB_VERSION }]],
+    ['productMedia', []],
+    ['nfeFiles', []],
   ];
 
-  for (const [store, values] of sets) {
-    await db.clear(store);
-    await db.bulkPut(store, values);
-  }
+  await new Promise<void>((resolve, reject) => {
+    const tx = dbInstance.transaction(stores, 'readwrite');
+
+    try {
+      for (const [store, values] of sets) {
+        const os = tx.objectStore(store);
+        os.clear();
+        for (const value of values) {
+          os.put(value);
+        }
+      }
+    } catch (error) {
+      tx.abort();
+      reject(error);
+      return;
+    }
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error('Falha ao substituir o snapshot.'));
+    tx.onabort = () => reject(tx.error ?? new Error('Substituição do snapshot abortada.'));
+  });
 }
 
 export function defaultConfig(): AppConfig {
