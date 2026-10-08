@@ -4,6 +4,7 @@ import { createInitialState } from './state';
 import { analyzeTextDocument, groupWordsIntoLines } from './domain/nfe-parser';
 import { applyImportedItems, normalizedCode } from './domain/nfe-matching';
 import { seedDatabase, tryLegacyMigration } from './app/bootstrap';
+import { nfePdfReader } from './app/nfe-pdf-reader';
 import { CATEGORY_META } from './seed';
 import {
   calculateWeightedAverageCost,
@@ -555,47 +556,7 @@ function lookupCode() { const code = $id('scan-code')?.value.trim(); if (!code)
     toast('Código não encontrado', 'error');
     return;
 } closeModal(); openProductDrawer(p.id); }
-async function readPdfSmartStandalone(file) {
-    const pdfjs = window.pdfjsLib;
-    if (!pdfjs)
-        throw new Error('Leitor PDF indisponível. Abra a aplicação com internet para carregar o PDF.js ou use o projeto com dependências locais.');
-    try {
-        pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    }
-    catch { }
-    const data = new Uint8Array(await file.arrayBuffer());
-    const pdf = await pdfjs.getDocument({ data }).promise;
-    const pageBlocks = [];
-    let wordCount = 0;
-    for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
-        const page = await pdf.getPage(pageNo);
-        const content = await page.getTextContent();
-        const words = [];
-        const viewport = page.getViewport({ scale: 1 });
-        for (const raw of content.items) {
-            const text = String(raw.str ?? '').trim();
-            if (!text)
-                continue;
-            const x = Number(raw.transform?.[4] ?? 0);
-            const y = viewport.height - Number(raw.transform?.[5] ?? 0) - Number(raw.height ?? 0);
-            const width = Number(raw.width ?? 0);
-            const height = Number(raw.height ?? 0);
-            words.push({ text, x, y, width, height, page: pageNo });
-            wordCount++;
-        }
-        pageBlocks.push(groupWordsIntoLines(words).join('\n'));
-    }
-    if (!wordCount) {
-        return {
-            profile: 'generic', profileConfidence: 0, pages: pdf.numPages, rawText: '', metadata: { number: undefined, key: undefined, cnpj: undefined, issueDate: undefined, total: undefined, supplierName: undefined }, items: [],
-            warnings: ['O PDF não contém texto selecionável. Ele provavelmente é um PDF escaneado/imagem e precisa de OCR.']
-        };
-    }
-    const result = analyzeTextDocument(pageBlocks.join('\n'));
-    result.pages = pdf.numPages;
-    return result;
-}
-async function parsePdfMetadata(file) { return readPdfSmartStandalone(file); }
+async function parsePdfMetadata(file: File) { return nfePdfReader.read(file); }
 async function imageDHash(blob) { const w = 9, h = 8; const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; const ctx = canvas.getContext('2d', { willReadFrequently: true }); if (!ctx)
     throw new Error('Canvas não disponível'); const url = URL.createObjectURL(blob); try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => { const el = new Image(); el.onload = () => resolve(el); el.onerror = () => reject(new Error('Imagem inválida.')); el.src = url; });
