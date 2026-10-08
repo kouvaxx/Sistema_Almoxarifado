@@ -1,6 +1,14 @@
 import './styles.css';
 import { db, defaultConfig, loadSnapshot, replaceSnapshot } from './db';
 import { CATEGORY_META, SEED_CATEGORIES, SEED_PRODUCTS, SEED_SUPPLIERS } from './seed';
+import {
+  calculateNextStock,
+  calculateWeightedAverageCost,
+  getStockStatus,
+  movementTypeLabel,
+  stockStatusClass,
+  stockStatusLabel,
+} from './domain/stock';
 import type {
   AppConfig,
   AuditEntry,
@@ -100,17 +108,9 @@ function rebuildIndexes() { productIndex = new Map(state.products.map(p => [p.id
 function getProduct(id) { return productIndex.get(id) ?? state.products.find(p => p.id === id); }
 function getSupplier(id) { return id ? (supplierIndex.get(id) ?? state.suppliers.find(s => s.id === id)) : undefined; }
 function getCategory(id) { return categoryIndex.get(id) ?? state.categories.find(c => c.id === id); }
-function statusFor(p) {
-    if (p.currentStock <= 0)
-        return 'critical';
-    if (p.minimumStock > 0 && p.currentStock <= p.minimumStock)
-        return 'low';
-    if (p.maximumStock && p.currentStock > p.maximumStock)
-        return 'over';
-    return 'ok';
-}
-function statusLabel(s) { return s === 'critical' ? 'Zerado' : s === 'low' ? 'Comprar' : s === 'over' ? 'Excedente' : 'Normal'; }
-function statusClass(s) { return `status-${s}`; }
+const statusFor = getStockStatus;
+const statusLabel = stockStatusLabel;
+const statusClass = stockStatusClass;
 function log(type, message, detail, entityType, entityId) {
     const item = { id: uid('audit'), type, message, detail, entityType, entityId, createdAt: now() };
     state.audit.unshift(item);
@@ -452,31 +452,18 @@ async function saveMovement() {
         return;
     }
     const current = product.currentStock;
-    let next = current;
-    if (type === 'entrada' || type === 'devolucao')
-        next = current + amount;
-    else if (type === 'saida' || type === 'transferencia')
-        next = current - amount;
-    else
-        next = amount;
+    const next = calculateNextStock(current, type, amount);
     if (next < 0 && !state.config.allowNegativeStock) {
         toast(`Estoque insuficiente. Disponível: ${qty(current)}.`, 'error');
         return;
     }
     const cost = Math.max(0, Number(document.getElementById('m-cost').value) || product.currentCost);
     if (type === 'entrada' && amount > 0 && cost > 0) {
-        const totalBefore = product.averageCost * current;
-        const totalIn = cost * amount;
-        product.averageCost = (totalBefore + totalIn) / (current + amount || 1);
+        product.averageCost = calculateWeightedAverageCost(current, product.averageCost, amount, cost);
         product.currentCost = cost;
         product.lastPurchaseAt = now();
     }
-    if (type === 'saida' || type === 'transferencia' || type === 'devolucao')
-        product.currentStock = next;
-    else if (type === 'entrada')
-        product.currentStock = next;
-    else
-        product.currentStock = next;
+    product.currentStock = next;
     product.updatedAt = now();
     const m = { id: uid('mov'), productId: product.id, productCode: product.code, productName: product.name, type, quantity: amount, unitCost: cost, document: document.getElementById('m-doc').value.trim(), responsible: document.getElementById('m-resp').value.trim(), workOrder: document.getElementById('m-os').value.trim(), vehicle: document.getElementById('m-vehicle').value.trim(), note: document.getElementById('m-note').value.trim(), createdAt: now() };
     state.movements.unshift(m);
@@ -487,7 +474,7 @@ async function saveMovement() {
     renderPage();
     toast('Movimentação registrada');
 }
-function typeLabel(t) { return t === 'entrada' ? 'Entrada' : t === 'saida' ? 'Saída' : t === 'ajuste' ? 'Ajuste' : t === 'devolucao' ? 'Devolução' : 'Transferência'; }
+const typeLabel = movementTypeLabel;
 async function saveInventory() { const inputs = [...document.querySelectorAll('.inventory-input')]; let changes = 0; for (const input of inputs) {
     if (input.value === '')
         continue;
