@@ -94,6 +94,31 @@ export const repository = {
     return db.bulkPut('nfeItems', values);
   },
 
+  async saveNfeProcessing(input: {
+    nfe: NfeDocument;
+    suppliers: Supplier[];
+    products: Product[];
+    movements: Movement[];
+    nfeItems: NfeItem[];
+  }): Promise<void> {
+    await db.runTransaction(
+      ['suppliers', 'products', 'movements', 'nfeItems', 'nfe'],
+      tx => {
+        const suppliers = tx.objectStore('suppliers');
+        const products = tx.objectStore('products');
+        const movements = tx.objectStore('movements');
+        const nfeItems = tx.objectStore('nfeItems');
+        const nfe = tx.objectStore('nfe');
+
+        for (const value of input.suppliers) suppliers.put(value);
+        for (const value of input.products) products.put(value);
+        for (const value of input.movements) movements.put(value);
+        for (const value of input.nfeItems) nfeItems.put(value);
+        nfe.put(input.nfe);
+      },
+    );
+  },
+
   saveConfig(value: AppConfig): Promise<void> {
     return db.put('config', value);
   },
