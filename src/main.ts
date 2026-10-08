@@ -1,5 +1,5 @@
 import './styles.css';
-import { db, defaultConfig, loadSnapshot } from './db';
+import { repository } from './app/repository';
 import { createInitialState } from './state';
 import { analyzeTextDocument } from './domain/nfe-parser';
 import { applyImportedItems } from './domain/nfe-matching';
@@ -120,7 +120,7 @@ function log(type: AuditEntry['type'], message: string, detail?: string, entityT
     const item = { id: uid('audit'), type, message, detail, entityType, entityId, createdAt: now() };
     state.audit.unshift(item);
     state.audit = state.audit.slice(0, 3000);
-    db.put('audit', item).catch(() => { });
+    repository.saveAudit(item).catch(() => { });
 }
 function toast(message: string, type: 'success' | 'warning' | 'error' = 'success') {
     const el = document.createElement('div');
@@ -337,9 +337,9 @@ async function saveProduct(id) {
     }
     if (!p) {
         const newProduct: Product = { id: uid('p'), code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, currentStock: Math.max(0, Number($id('p-stock').value) || 0), minimumStock: min, reservedStock: 0, currentCost: cost, averageCost: cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual', photoHash, photoUpdatedAt: photoFile ? now() : undefined };
-        await db.put('products', newProduct);
+        await repository.saveProduct(newProduct);
         if (photoFile) {
-            await db.put('productMedia', {
+            await repository.saveProductMedia({
                 id: newProduct.id,
                 productId: newProduct.id,
                 blob: photoFile,
@@ -355,9 +355,9 @@ async function saveProduct(id) {
     }
     else {
         Object.assign(p, { code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, minimumStock: min, currentCost: cost, averageCost: p.averageCost || cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, photoHash, photoUpdatedAt: photoFile ? now() : p.photoUpdatedAt, updatedAt: now() });
-        await db.put('products', p);
+        await repository.saveProduct(p);
         if (photoFile) {
-            await db.put('productMedia', {
+            await repository.saveProductMedia({
                 id: p.id,
                 productId: p.id,
                 blob: photoFile,
@@ -375,25 +375,25 @@ async function saveProduct(id) {
 }
 async function deleteProduct(id) { const p = getProduct(id); if (!p)
     return; if (!confirm(`Desativar “${p.name}”? O histórico será preservado.`))
-    return; p.active = false; p.updatedAt = now(); await db.put('products', p); rebuildIndexes(); log('delete', `Produto desativado: ${p.name}`, 'Histórico preservado', 'product', p.id); closeDrawer(); renderPage(); toast('Produto desativado', 'warning'); }
+    return; p.active = false; p.updatedAt = now(); await repository.saveProduct(p); rebuildIndexes(); log('delete', `Produto desativado: ${p.name}`, 'Histórico preservado', 'product', p.id); closeDrawer(); renderPage(); toast('Produto desativado', 'warning'); }
 async function saveSupplier(id) { const name = $id('s-name').value.trim().toUpperCase(); if (!name) {
     toast('Nome do fornecedor é obrigatório', 'error');
     return;
 } let s = id ? getSupplier(id) : undefined; if (!s) {
     s = { id: uid('sup'), name, active: true, createdAt: now(), updatedAt: now(), cnpj: $id('s-cnpj').value.trim(), contact: $id('s-contact').value.trim(), phone: $id('s-phone').value.trim(), whatsapp: $id('s-whatsapp').value.trim(), email: $id('s-email').value.trim(), averageLeadDays: Math.max(0, Number($id('s-lead').value) || 0), paymentTerms: $id('s-payment').value.trim() };
     state.suppliers.push(s);
-    await db.put('suppliers', s);
+    await repository.saveSupplier(s);
     rebuildIndexes();
     log('create', `Fornecedor criado: ${name}`, '');
 }
 else {
     Object.assign(s, { name, cnpj: $id('s-cnpj').value.trim(), contact: $id('s-contact').value.trim(), phone: $id('s-phone').value.trim(), whatsapp: $id('s-whatsapp').value.trim(), email: $id('s-email').value.trim(), averageLeadDays: Math.max(0, Number($id('s-lead').value) || 0), paymentTerms: $id('s-payment').value.trim(), updatedAt: now() });
-    await db.put('suppliers', s);
+    await repository.saveSupplier(s);
     log('update', `Fornecedor alterado: ${name}`, 'Cadastro atualizado', 'supplier', s.id);
 } closeDrawer(); renderPage(); toast('Fornecedor salvo'); }
 async function deleteSupplier(id) { const s = getSupplier(id); if (!s)
     return; if (!confirm(`Desativar ${s.name}?`))
-    return; s.active = false; s.updatedAt = now(); await db.put('suppliers', s); log('delete', `Fornecedor desativado: ${s.name}`, 'Produtos vinculados permanecem cadastrados.', 'supplier', id); closeDrawer(); renderPage(); toast('Fornecedor desativado', 'warning'); }
+    return; s.active = false; s.updatedAt = now(); await repository.saveSupplier(s); log('delete', `Fornecedor desativado: ${s.name}`, 'Produtos vinculados permanecem cadastrados.', 'supplier', id); closeDrawer(); renderPage(); toast('Fornecedor desativado', 'warning'); }
 async function saveMovement() {
     const product = getProduct($id('m-product').value);
     if (!product) {
@@ -428,8 +428,8 @@ async function saveMovement() {
     product.updatedAt = now();
     const m: Movement = { id: uid('mov'), productId: product.id, productCode: product.code, productName: product.name, type, quantity: amount, unitCost: cost, document: $id('m-doc').value.trim(), responsible: $id('m-resp').value.trim(), workOrder: $id('m-os').value.trim(), vehicle: $id('m-vehicle').value.trim(), note: $id('m-note').value.trim(), createdAt: now() };
     state.movements.unshift(m);
-    await db.put('movements', m);
-    await db.put('products', product);
+    await repository.saveMovement(m);
+    await repository.saveProduct(product);
     log('movement', `${typeLabel(type)} · ${product.name}`, `${type === 'ajuste' ? 'Saldo final: ' + qty(next) : 'Quantidade: ' + qty(amount)} · Documento: ${m.document || '—'}`, 'movement', m.id);
     closeModal();
     renderPage();
@@ -476,8 +476,8 @@ async function saveInventory() {
         };
 
         state.movements.unshift(movement);
-        await db.put('movements', movement);
-        await db.put('products', product);
+        await repository.saveMovement(movement);
+        await repository.saveProduct(product);
         log('inventory', `Inventário ajustado: ${product.name}`, `${qty(before)} → ${qty(counted)}`, 'product', product.id);
     }
 
@@ -485,22 +485,22 @@ async function saveInventory() {
     toast(count ? `${count} ajustes registrados` : 'Nenhuma diferença para ajustar', count ? 'success' : 'warning');
     renderPage();
 }
-async function saveQuote() { const cart = (window._quoteCart?.() ?? []); const q: Quote = { id: uid('quote'), number: `ORC-${new Date().getFullYear()}-${String(state.quotes.length + 1).padStart(4, '0')}`, customer: $id('q-customer').value.trim(), title: $id('q-title').value.trim() || 'Orçamento', validUntil: $id('q-valid').value || undefined, status: 'draft', notes: $id('q-notes').value.trim(), items: cart, createdAt: now(), updatedAt: now() }; state.quotes.unshift(q); await db.put('quotes', q); log('create', `Orçamento criado: ${q.number}`, `${q.items.length} itens · ${money(quoteTotal(q))}`, 'quote', q.id); closeModal(); renderPage(); toast('Orçamento salvo'); }
+async function saveQuote() { const cart = (window._quoteCart?.() ?? []); const q: Quote = { id: uid('quote'), number: `ORC-${new Date().getFullYear()}-${String(state.quotes.length + 1).padStart(4, '0')}`, customer: $id('q-customer').value.trim(), title: $id('q-title').value.trim() || 'Orçamento', validUntil: $id('q-valid').value || undefined, status: 'draft', notes: $id('q-notes').value.trim(), items: cart, createdAt: now(), updatedAt: now() }; state.quotes.unshift(q); await repository.saveQuote(q); log('create', `Orçamento criado: ${q.number}`, `${q.items.length} itens · ${money(quoteTotal(q))}`, 'quote', q.id); closeModal(); renderPage(); toast('Orçamento salvo'); }
 function openNfeDetail(nfeId) { const n = state.nfe.find(x => x.id === nfeId); if (!n)
     return; const items = state.nfeItems.filter(i => i.nfeId === n.id); const profile = n.readerProfile === 'danfe' ? 'DANFE' : n.readerProfile === 'pedido' ? 'Pedido' : n.readerProfile === 'orcamento' ? 'Orçamento' : n.readerProfile === 'generic' ? 'Documento genérico' : 'Não identificado'; const review = items.filter(i => i.status === 'review').length; const canProcess = n.status !== 'processed' && n.status !== 'cancelled' && items.length > 0; const footer = `<div class="modal-actions nfe-modal-actions"><button class="btn btn-secondary" data-action="close-modal">Fechar</button>${n.status === 'cancelled' ? `<button class="btn btn-secondary" data-action="reopen-nfe" data-id="${n.id}">${icon('refresh', 15)} Reabrir revisão</button>` : n.status !== 'processed' ? `<button class="btn btn-danger ghost" data-action="delete-nfe" data-id="${n.id}">${icon('trash', 15)} Excluir nota</button><button class="btn btn-secondary" data-action="cancel-nfe" data-id="${n.id}">${icon('close', 15)} Cancelar revisão</button>` : ''}${canProcess ? `<button class="btn btn-primary" data-action="process-nfe" data-id="${n.id}">${icon('check', 15)} Confirmar entrada</button>` : ''}</div>`; showModal('Revisar documento', `<div class="detail-grid"><div><span>Status</span><b>${esc(n.status)}</b></div><div><span>Leitura</span><b>${esc(profile)}${n.readerConfidence ? ` · ${Math.round(n.readerConfidence * 100)}%` : ''}</b></div><div><span>Fornecedor</span><b>${esc(n.supplierName || '—')}</b></div><div><span>Número</span><b>${esc(n.number || '—')}</b></div><div><span>Itens</span><b>${items.length}</b></div><div><span>Revisão</span><b>${review ? review + ' item(ns)' : 'Nenhum item pendente'}</b></div></div>${n.parseWarnings?.length ? `<div class="data-note"><span>${icon('alert', 17)}</span><p><b>Alertas</b><br/>${n.parseWarnings.map(w => esc(w)).join('<br/>')}</p></div>` : ''}<div class="data-note"><span>${icon('file', 17)}</span><p><b>${esc(n.sourceName)}</b><br/>${esc(n.note || 'Documento pronto para conferência.')}</p></div>${items.length ? `<div class="modal-subtitle">Itens reconhecidos</div><div class="table-wrap mini-table"><table><thead><tr><th>Item</th><th>Código</th><th>Qtd.</th><th>Unit.</th><th>Confiança</th><th>Correspondência</th><th>Ação</th></tr></thead><tbody>${items.map(i => { const conf = Math.round((i.confidence ?? 0) * 100), m = Math.round((i.matchConfidence ?? 0) * 100), p = i.matchedProductId ? getProduct(i.matchedProductId) : undefined; const cls = conf >= 80 ? 'status-ok' : conf >= 60 ? 'status-low' : 'status-critical'; return `<tr><td><b>${esc(i.description)}</b><small>${i.warnings?.[0] ? esc(i.warnings[0]) : esc(i.sourceLine || '')}</small></td><td>${esc(i.code || '—')}</td><td>${qty(i.quantity)} ${esc(i.unit)}</td><td>${money(i.unitCost)}</td><td><span class="status ${cls}"><i></i>${conf}%</span></td><td><span class="status ${p ? 'status-ok' : 'status-low'}"><i></i>${p ? esc(p.name) : 'Novo'}${m ? ` · ${m}%` : ''}</span></td><td><span class="status ${i.status === 'review' ? 'status-low' : i.status === 'skip' ? 'status-critical' : 'status-ok'}"><i></i>${i.status === 'review' ? 'Revisar' : i.status === 'skip' ? 'Ignorado' : i.status === 'new' ? 'Novo' : 'Pronto'}</span></td></tr>`; }).join('')}</tbody></table></div>` : ''}${footer}`); }
 async function setNfeItemStatus(id, status) { const item = state.nfeItems.find(i => i.id === id); if (!item)
-    return; item.status = status; await db.put('nfeItems', item); closeModal(); openNfeDetail(item.nfeId); }
+    return; item.status = status; await repository.saveNfeItem(item); closeModal(); openNfeDetail(item.nfeId); }
 async function deleteNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n)
     return; if (n.status === 'processed') {
     toast('NF-e processada não pode ser excluída.', 'warning');
     return;
 } if (!confirm(`Excluir o documento "${n.sourceName}" e todos os itens reconhecidos?`))
     return; const items = state.nfeItems.filter(i => i.nfeId === id); for (const item of items)
-    await db.delete('nfeItems', item.id); state.nfeItems = state.nfeItems.filter(i => i.nfeId !== id); state.nfe = state.nfe.filter(x => x.id !== id); await db.delete('nfeFiles', id); await db.delete('nfe', id); log('delete', `Documento excluído: ${n.sourceName}`, `${items.length} itens removidos`, 'nfe', id); closeModal(); renderPage(); toast('Documento excluído', 'warning'); }
+    await repository.deleteNfeItem(item.id); state.nfeItems = state.nfeItems.filter(i => i.nfeId !== id); state.nfe = state.nfe.filter(x => x.id !== id); await repository.deleteNfeFile(id); await repository.deleteNfe(id); log('delete', `Documento excluído: ${n.sourceName}`, `${items.length} itens removidos`, 'nfe', id); closeModal(); renderPage(); toast('Documento excluído', 'warning'); }
 async function cancelNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n || n.status === 'processed')
-    return; n.status = 'cancelled'; n.note = `Revisão cancelada em ${dateTime(now())}.`; await db.put('nfe', n); log('update', `Revisão cancelada: ${n.sourceName}`, 'Documento mantido para histórico', 'nfe', id); closeModal(); renderPage(); toast('Revisão cancelada', 'warning'); }
+    return; n.status = 'cancelled'; n.note = `Revisão cancelada em ${dateTime(now())}.`; await repository.saveNfe(n); log('update', `Revisão cancelada: ${n.sourceName}`, 'Documento mantido para histórico', 'nfe', id); closeModal(); renderPage(); toast('Revisão cancelada', 'warning'); }
 async function reopenNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n || n.status !== 'cancelled')
-    return; n.status = 'review'; n.note = `Revisão reaberta em ${dateTime(now())}.`; await db.put('nfe', n); log('update', `Revisão reaberta: ${n.sourceName}`, 'Documento voltou para conferência', 'nfe', id); closeModal(); openNfeDetail(id); }
+    return; n.status = 'review'; n.note = `Revisão reaberta em ${dateTime(now())}.`; await repository.saveNfe(n); log('update', `Revisão reaberta: ${n.sourceName}`, 'Documento voltou para conferência', 'nfe', id); closeModal(); openNfeDetail(id); }
 async function processNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n)
     return; if (n.status === 'processed') {
     toast('Este documento já foi processado.', 'warning');
@@ -523,7 +523,7 @@ async function processNfe(id) { const n = state.nfe.find(x => x.id === id); if (
             if (!sup) {
                 sup = { id: uid('sup'), name: n.supplierName, active: true, createdAt: now(), updatedAt: now() };
                 state.suppliers.push(sup);
-                await db.put('suppliers', sup);
+                await repository.saveSupplier(sup);
             }
             supId = sup.id;
         }
@@ -531,7 +531,7 @@ async function processNfe(id) { const n = state.nfe.find(x => x.id === id); if (
         p = { id: uid('p'), code: item.code || '—', name: item.description.toUpperCase(), supplierId: supId, supplierNameLegacy: n.supplierName || '', categoryId: cat?.id || '', unit: item.unit || 'un', currentStock: 0, minimumStock: state.config.defaultMinimumStock, reservedStock: 0, currentCost: item.unitCost || 0, averageCost: item.unitCost || 0, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual' };
         state.products.unshift(p);
         item.matchedProductId = p.id;
-        await db.put('products', p);
+        await repository.saveProduct(p);
         created++;
     }
     if (!p)
@@ -543,15 +543,15 @@ async function processNfe(id) { const n = state.nfe.find(x => x.id === id); if (
         p.currentStock = current + amount;
         p.lastPurchaseAt = n.issueDate || now();
         p.updatedAt = now();
-        await db.put('products', p);
+        await repository.saveProduct(p);
         const m: Movement = { id: uid('mov'), productId: p.id, productCode: p.code, productName: p.name, type: 'entrada', quantity: amount, unitCost: cost, document: n.number || n.key || n.sourceName, note: `Importação inteligente · ${n.readerProfile || 'documento'} · ${item.matchMethod || 'sem-match'}`, createdAt: now() };
         state.movements.unshift(m);
-        await db.put('movements', m);
+        await repository.saveMovement(m);
         item.status = 'update';
-        await db.put('nfeItems', item);
+        await repository.saveNfeItem(item);
         updated++;
     }
-} rebuildIndexes(); n.status = 'processed'; n.note = `Processado: ${updated} movimentos · ${created} novos produtos.`; await db.put('nfe', n); log('import', `Documento processado: ${n.sourceName}`, `${updated} movimentos · ${created} novos produtos`, 'nfe', id); closeModal(); renderPage(); toast(`Entrada confirmada: ${updated} movimentos · ${created} novos`, 'success'); }
+} rebuildIndexes(); n.status = 'processed'; n.note = `Processado: ${updated} movimentos · ${created} novos produtos.`; await repository.saveNfe(n); log('import', `Documento processado: ${n.sourceName}`, `${updated} movimentos · ${created} novos produtos`, 'nfe', id); closeModal(); renderPage(); toast(`Entrada confirmada: ${updated} movimentos · ${created} novos`, 'success'); }
 function scanCode() { showModal('Consultar código', `<div class="scan-box"><div class="scan-visual">${icon('barcode', 56)}</div><p>Digite ou cole o código interno/EAN. Em navegadores que suportam BarcodeDetector, o leitor por câmera pode ser adicionado ao adaptador PWA.</p><label>Código<input id="scan-code" autofocus placeholder="Ex.: 7891645083014" /></label><div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Cancelar</button><button class="btn btn-primary" data-action="lookup-code">${icon('search', 15)} Consultar</button></div></div>`); setTimeout(() => $id('scan-code')?.focus(), 50); }
 function lookupCode() { const code = $id('scan-code')?.value.trim(); if (!code)
     return toast('Informe um código', 'warning'); const p = state.products.find(x => x.code === code); if (!p) {
@@ -574,7 +574,7 @@ async function searchByPhoto(file) { if (!file.type.startsWith('image/')) {
 async function importTextOrder(text, name) { const result = analyzeTextDocument(text); if (!result.items.length) {
     toast('Nenhum item identificável no pedido. Revise o texto ou use CSV.', 'error');
     return;
-} const n: NfeDocument = { id: uid('nfe'), sourceName: name, sourceType: 'manual', status: 'review', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile as NfeDocument['readerProfile'], readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: `Leitura inteligente de texto · ${result.profile}` }; const items = applyImportedItems(result.items, n.id, state.products); state.nfe.unshift(n); state.nfeItems.push(...items); await db.put('nfe', n); await db.bulkPut('nfeItems', items); log('import', `Pedido importado: ${name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id); toast(`${items.length} itens reconhecidos`, 'success'); renderPage(); }
+} const n: NfeDocument = { id: uid('nfe'), sourceName: name, sourceType: 'manual', status: 'review', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile as NfeDocument['readerProfile'], readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: `Leitura inteligente de texto · ${result.profile}` }; const items = applyImportedItems(result.items, n.id, state.products); state.nfe.unshift(n); state.nfeItems.push(...items); await repository.saveNfe(n); await repository.saveNfeItems(items); log('import', `Pedido importado: ${name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id); toast(`${items.length} itens reconhecidos`, 'success'); renderPage(); }
 async function importFile(file: File) {
     await dispatchImport(file, {
         json: async input => {
@@ -604,8 +604,8 @@ async function importPdfFile(file: File) {
         const items = applyImportedItems(result.items, n.id, state.products);
         state.nfe.unshift(n);
         state.nfeItems.push(...items);
-        await db.put('nfe', n);
-        await db.put('nfeFiles', {
+        await repository.saveNfe(n);
+        await repository.saveNfeFile({
             id: n.id,
             nfeId: n.id,
             blob: file,
@@ -614,7 +614,7 @@ async function importPdfFile(file: File) {
             createdAt: n.createdAt,
         });
         if (items.length)
-            await db.bulkPut('nfeItems', items);
+            await repository.saveNfeItems(items);
         log('import', `PDF importado: ${file.name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id);
         toast(items.length ? `${items.length} itens reconhecidos. Revise a leitura.` : 'PDF lido, mas nenhum item foi reconhecido.', 'warning');
         renderPage();
@@ -623,8 +623,8 @@ async function importPdfFile(file: File) {
         const message = err instanceof Error ? err.message : String(err);
         const n: NfeDocument = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: 'error', createdAt: now(), parseWarnings: [message], note: 'Falha na leitura do PDF.' };
         state.nfe.unshift(n);
-        await db.put('nfe', n);
-        await db.put('nfeFiles', {
+        await repository.saveNfe(n);
+        await repository.saveNfeFile({
             id: n.id,
             nfeId: n.id,
             blob: file,
@@ -687,7 +687,7 @@ async function importCsv(text, name) {
         note: `${validation.products.length} linhas importadas`,
     };
 
-    await db.put('nfe', n);
+    await repository.saveNfe(n);
     state.nfe.unshift(n);
 
     let applied = 0;
@@ -705,7 +705,7 @@ async function importCsv(text, name) {
             if (!stockCheck.ok) {
                 n.status = 'error';
                 n.note = 'message' in stockCheck ? stockCheck.message : 'Saldo inválido.';
-                await db.put('nfe', n);
+                await repository.saveNfe(n);
                 toast(`Importação interrompida: ${'message' in stockCheck ? stockCheck.message : 'Saldo inválido.'}`, 'error');
                 return;
             }
@@ -716,7 +716,7 @@ async function importCsv(text, name) {
         p.currentStock = p.currentStock + raw.currentStock;
         p.averageCost = p.averageCost ? p.averageCost : raw.averageCost;
         p.updatedAt = now();
-        await db.put('products', p);
+        await repository.saveProduct(p);
 
         if (raw.currentStock > 0) {
             const movement: Movement = {
@@ -731,13 +731,13 @@ async function importCsv(text, name) {
                 createdAt: now(),
             };
             state.movements.unshift(movement);
-            await db.put('movements', movement);
+            await repository.saveMovement(movement);
         }
         applied++;
     }
 
     n.status = 'processed';
-    await db.put('nfe', n);
+    await repository.saveNfe(n);
     log('import', `CSV processado: ${name}`, `${applied} produtos atualizados`, 'nfe', n.id);
     toast(`Importação concluída: ${applied} produtos`);
     renderPage();
@@ -780,7 +780,7 @@ async function importSnapshot(parsed, name) {
                 currentStock: raw.currentStock,
                 minimumStock: raw.minimumStock,
             });
-            await db.put('products', found);
+            await repository.saveProduct(found);
             updated++;
             continue;
         }
@@ -795,7 +795,7 @@ async function importSnapshot(parsed, name) {
                 tone: CATEGORY_META[catName]?.tone ?? 'slate',
             };
             state.categories.push(cat);
-            await db.put('categories', cat);
+            await repository.saveCategory(cat);
         }
 
         const supplierName = raw.supplierName?.trim() || '';
@@ -811,7 +811,7 @@ async function importSnapshot(parsed, name) {
                     updatedAt: now(),
                 };
                 state.suppliers.push(supplier);
-                await db.put('suppliers', supplier);
+                await repository.saveSupplier(supplier);
             }
             supplierId = supplier.id;
         }
@@ -836,7 +836,7 @@ async function importSnapshot(parsed, name) {
         };
 
         state.products.push(product);
-        await db.put('products', product);
+        await repository.saveProduct(product);
         created++;
     }
 
@@ -898,7 +898,7 @@ async function applyConfig() { const negative = $id('cfg-negative')?.checked; co
     state.config.defaultMinimumStock = Math.max(0, Number($id('cfg-min').value) || 0);
     if (lite !== undefined)
         state.config.liteMode = lite;
-    await db.put('config', state.config);
+    await repository.saveConfig(state.config);
     $q(document, '.app-shell')?.classList.toggle('lite-mode', !!state.config.liteMode);
     log('system', 'Configurações atualizadas', `Modo Lite: ${state.config.liteMode ? 'ativado' : 'desativado'}`);
     toast('Configurações salvas');
@@ -986,7 +986,7 @@ function wire() {
         if (action === 'theme') {
             state.theme = state.theme === 'dark' ? 'light' : 'dark';
             state.config.theme = state.theme;
-            await db.put('config', state.config);
+            await repository.saveConfig(state.config);
             const shell = $q(document, '.app-shell');
             shell?.classList.toggle('theme-light', state.theme === 'light');
             const tb = $q(document, '[data-action=theme]');
