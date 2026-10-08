@@ -395,27 +395,45 @@ async function saveProduct(id) {
     const p = id ? getProduct(id) : undefined;
     const photoFile = document.getElementById('p-photo')?.files?.[0] || pendingPhotoFile;
     let photoHash = p?.photoHash;
-    let photoBlob = p?.photoBlob;
     if (photoFile) {
         try {
             photoHash = await imageDHash(photoFile);
-            photoBlob = photoFile;
         }
         catch {
             toast('Não foi possível processar a foto.', 'warning');
         }
     }
     if (!p) {
-        const newProduct = { id: uid('p'), code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, currentStock: Math.max(0, Number(document.getElementById('p-stock').value) || 0), minimumStock: min, reservedStock: 0, currentCost: cost, averageCost: cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual', photoHash, photoBlob, photoUpdatedAt: photoFile ? now() : undefined };
+        const newProduct = { id: uid('p'), code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, currentStock: Math.max(0, Number(document.getElementById('p-stock').value) || 0), minimumStock: min, reservedStock: 0, currentCost: cost, averageCost: cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual', photoHash, photoUpdatedAt: photoFile ? now() : undefined };
         await db.put('products', newProduct);
+        if (photoFile) {
+            await db.put('productMedia', {
+                id: newProduct.id,
+                productId: newProduct.id,
+                blob: photoFile,
+                mimeType: photoFile.type || 'image/*',
+                name: photoFile.name,
+                updatedAt: newProduct.photoUpdatedAt || now(),
+            });
+        }
         state.products.unshift(newProduct);
         rebuildIndexes();
         log('create', `Produto criado: ${name}`, `Código ${code}`, 'product', newProduct.id);
         toast('Produto criado');
     }
     else {
-        Object.assign(p, { code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, minimumStock: min, currentCost: cost, averageCost: p.averageCost || cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, photoHash, photoBlob, photoUpdatedAt: photoFile ? now() : p.photoUpdatedAt, updatedAt: now() });
+        Object.assign(p, { code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, minimumStock: min, currentCost: cost, averageCost: p.averageCost || cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, photoHash, photoUpdatedAt: photoFile ? now() : p.photoUpdatedAt, updatedAt: now() });
         await db.put('products', p);
+        if (photoFile) {
+            await db.put('productMedia', {
+                id: p.id,
+                productId: p.id,
+                blob: photoFile,
+                mimeType: photoFile.type || 'image/*',
+                name: photoFile.name,
+                updatedAt: p.photoUpdatedAt || now(),
+            });
+        }
         log('update', `Produto alterado: ${name}`, 'Cadastro atualizado', 'product', p.id);
         toast('Alterações salvas');
     }
@@ -1090,7 +1108,7 @@ else if (ext === 'txt' || file.type === 'text/plain') {
 else if (ext === 'pdf' || file.type === 'application/pdf') {
     try {
         const result = await parsePdfMetadata(file);
-        const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: result.items.length ? 'review' : 'error', createdAt: now(), fileBlob: file, number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile, readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: result.items.length ? `Leitura inteligente: ${result.profile} · ${result.items.length} itens.` : 'Nenhum item reconhecido automaticamente.' };
+        const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: result.items.length ? 'review' : 'error', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile, readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: result.items.length ? `Leitura inteligente: ${result.profile} · ${result.items.length} itens.` : 'Nenhum item reconhecido automaticamente.' };
         const items = applyImportedItems(result.items, n.id);
         state.nfe.unshift(n);
         state.nfeItems.push(...items);
@@ -1103,7 +1121,7 @@ else if (ext === 'pdf' || file.type === 'application/pdf') {
     }
     catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: 'error', createdAt: now(), fileBlob: file, parseWarnings: [message], note: 'Falha na leitura do PDF.' };
+        const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: 'error', createdAt: now(), parseWarnings: [message], note: 'Falha na leitura do PDF.' };
         state.nfe.unshift(n);
         await db.put('nfe', n);
         log('import', `Erro ao ler PDF: ${file.name}`, message, 'nfe', n.id);
