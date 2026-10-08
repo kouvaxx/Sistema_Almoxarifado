@@ -1,8 +1,8 @@
 import './styles.css';
-import { db, defaultConfig, loadSnapshot, replaceSnapshot } from './db';
+import { db, defaultConfig, loadSnapshot } from './db';
+import { createInitialState } from './state';
 import { CATEGORY_META, SEED_CATEGORIES, SEED_PRODUCTS, SEED_SUPPLIERS } from './seed';
 import {
-  calculateNextStock,
   calculateWeightedAverageCost,
   getStockStatus,
   movementTypeLabel,
@@ -14,26 +14,20 @@ import {
   validateInventoryCount,
   validateStockMovement,
 } from './domain/validation';
-import type {
-  AppConfig,
-  AuditEntry,
-  Category,
-  DatabaseSnapshot,
-  Movement,
-  MovementType,
-  NfeDocument,
-  NfeItem,
-  Product,
-  Quote,
-  QuoteItem,
-  Supplier,
-  View,
-} from './types';
+import type { AuditEntry, Movement, MovementType, NfeDocument, Product, Quote, View } from './types';
 
 // A implementação abaixo foi restaurada a partir da versão funcional v9.2 autocontida.
 // A etapa seguinte do roadmap deve separar UI, domínio e persistência sem alterar seu comportamento.
-// @ts-nocheck
 
+function $id<T extends HTMLElement = HTMLInputElement>(id: string): T | null {
+    return $id(id) as T | null;
+}
+function $q<T extends HTMLElement = HTMLInputElement>(root: ParentNode, selector: string): T | null {
+    return $q(root, selector) as T | null;
+}
+function $qa<T extends HTMLElement = HTMLInputElement>(root: ParentNode, selector: string): T[] {
+    return Array.from($qa(root, selector)) as T[];
+}
 const APP = 'Almoxarifado v9.2';
 const uid = (prefix = 'id') => `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
 const now = () => new Date().toISOString();
@@ -42,7 +36,7 @@ const qty = (n) => new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 3 }).
 const dateTime = (s) => s ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(s)) : '—';
 const dateOnly = (s) => s ? new Intl.DateTimeFormat('pt-BR').format(new Date(s)) : '—';
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const norm = (v) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const norm = (v: unknown): string => String(v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 const NAV = [
     { id: 'dashboard', label: 'Visão geral', section: 'INÍCIO', icon: 'dashboard' },
     { id: 'products', label: 'Produtos', section: 'CADASTRO', icon: 'box' },
@@ -92,16 +86,16 @@ const ICONS = {
     chart: '<path d="M4 19V9M10 19V5M16 19v-8M22 19V3"/>',
     key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l2 2M14 9l2 2"/>'
 };
-const icon = (name, size = 18) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] ?? ICONS.box}</svg>`;
-let state = { products: [], suppliers: [], categories: [], movements: [], nfe: [], nfeItems: [], quotes: [], audit: [], config: defaultConfig(), view: 'dashboard', query: '', categoryId: '', supplierId: '', stockStatus: '', sort: 'name', mobileNav: false, sidebarCollapsed: false, theme: 'dark' };
+const icon = (name: string, size = 18) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${(ICONS as Record<string, string>)[name] ?? ICONS.box}</svg>`;
+let state = createInitialState();
 let productIndex = new Map();
 let productCodeIndex = new Map();
 let productNormalizedCodeIndex = new Map();
 let productNameIndex = new Map();
 let supplierIndex = new Map();
 let categoryIndex = new Map();
-let pendingPhotoFile;
-let photoSearchFile;
+let pendingPhotoFile: File | undefined;
+let photoSearchFile: File | undefined;
 function rebuildIndexes() { productIndex = new Map(state.products.map(p => [p.id, p])); productCodeIndex = new Map(); productNormalizedCodeIndex = new Map(); productNameIndex = new Map(); for (const p of state.products) {
     productCodeIndex.set(String(p.code).trim(), p);
     const nc = normalizedCode(p.code);
@@ -116,13 +110,13 @@ function getCategory(id) { return categoryIndex.get(id) ?? state.categories.find
 const statusFor = getStockStatus;
 const statusLabel = stockStatusLabel;
 const statusClass = stockStatusClass;
-function log(type, message, detail, entityType, entityId) {
+function log(type: AuditEntry['type'], message: string, detail?: string, entityType?: string, entityId?: string) {
     const item = { id: uid('audit'), type, message, detail, entityType, entityId, createdAt: now() };
     state.audit.unshift(item);
     state.audit = state.audit.slice(0, 3000);
     db.put('audit', item).catch(() => { });
 }
-function toast(message, type = 'success') {
+function toast(message: string, type: 'success' | 'warning' | 'error' = 'success') {
     const el = document.createElement('div');
     el.className = `toast ${type}`;
     el.innerHTML = `<span>${type === 'success' ? icon('check', 16) : type === 'warning' ? icon('alert', 16) : icon('alert', 16)}</span>${esc(message)}`;
@@ -341,7 +335,7 @@ function quoteTotal(q) { return q.items.reduce((sum, i) => sum + i.quantity * i.
 function renderAudit() { const entries = state.audit.slice().sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)); return pageHead('Auditoria', 'Histórico das alterações e operações relevantes.', actionBtn('Exportar JSON', 'export-json', 'download')) + `<div class="panel"><div class="audit-list">${entries.slice(0, 150).map(a => `<div class="audit-row"><span class="audit-icon ${a.type}">${icon(a.type === 'movement' ? 'layers' : a.type === 'delete' ? 'trash' : a.type === 'create' ? 'plus' : a.type === 'import' ? 'upload' : 'history', 15)}</span><div><b>${esc(a.message)}</b><small>${dateTime(a.createdAt)}${a.detail ? ' · ' + esc(a.detail) : ''}</small></div><span class="audit-type">${esc(a.type)}</span></div>`).join('') || `<div class="empty-state mini"><span>Nenhum registro.</span></div>`}</div></div>`; }
 function renderSettings() { return pageHead('Configurações', 'Preferências operacionais, desempenho e manutenção do banco local.') + `<div class="settings-grid"><div class="panel settings-card"><div class="panel-head"><div><h2>Estoque</h2><p>Regras de movimentação.</p></div></div><label class="setting-row"><span><b>Permitir estoque negativo</b><small>Desligado por padrão para evitar saídas acima do físico.</small></span><input id="cfg-negative" type="checkbox" ${state.config.allowNegativeStock ? 'checked' : ''}/></label><label class="setting-row"><span><b>Estoque mínimo padrão</b><small>Aplicado a novos produtos.</small></span><input id="cfg-min" class="small-input" type="number" min="0" step="0.001" value="${state.config.defaultMinimumStock}"/></label></div><div class="panel settings-card"><div class="panel-head"><div><h2>Desempenho</h2><p>Reduza efeitos e renderizações secundárias em máquinas menos potentes.</p></div></div><label class="setting-row"><span><b>Modo Lite</b><small>Desativa desfoque, sombras, transições e painéis secundários do dashboard.</small></span><input id="cfg-lite" type="checkbox" ${state.config.liteMode ? 'checked' : ''}/></label><div class="data-note"><span>${icon('zap', 17)}</span><p><b>Indicado para PCs com pouca RAM/GPU.</b><br/>Os dados e funções permanecem iguais.</p></div></div><div class="panel settings-card"><div class="panel-head"><div><h2>Dados</h2><p>Backup e migração.</p></div></div><div class="setting-actions">${actionBtn('Exportar backup', 'export-json', 'download')} ${actionBtn('Exportar CSV', 'export-csv', 'download')} ${actionBtn('Importar backup', 'import-backup', 'upload')} ${actionBtn('Imprimir relatório', 'print-report', 'print')}</div><div class="data-note"><span>${icon('shield', 17)}</span><p><b>Banco local seguro por estrutura</b><br/>A v9 usa IndexedDB em navegador suportado e mantém exportação manual.</p></div></div><div class="panel settings-card"><div class="panel-head"><div><h2>Uso no iPhone</h2><p>Instale o web app pela tela inicial do Safari.</p></div></div><div class="data-note"><span>${icon('camera', 17)}</span><p><b>Busca por foto</b><br/>Use a câmera/fotos para localizar produtos por código quando disponível ou por foto de referência cadastrada.</p></div><div class="setting-actions">${actionBtn('Compartilhar acesso', 'share-app', 'upload')}</div><div class="data-note"><span>${icon('layers', 17)}</span><p><b>Banco local por dispositivo</b><br/>O iPhone e o PC ainda mantêm cópias locais independentes. A sincronização em nuvem será a próxima camada.</p></div></div></div>`; }
 function empty(title, text, iconName = 'box') { return `<div class="empty-state"><div class="empty-icon">${icon(iconName, 28)}</div><b>${title}</b><span>${text}</span></div>`; }
-function openProductDrawer(productId) {
+function openProductDrawer(productId?: string) {
     const p = productId ? getProduct(productId) : undefined;
     const isNew = !p;
     const cats = state.categories;
@@ -351,48 +345,48 @@ function openProductDrawer(productId) {
     <div class="form-section"><div class="form-section-title">Identificação visual</div><label>Foto de referência<input id="p-photo" type="file" accept="image/*" capture="environment" /><small class="field-help">Usada pela Busca por foto. A imagem fica neste dispositivo.</small><span class="photo-state">${p?.photoHash ? '✓ Foto de referência cadastrada' : 'Nenhuma foto cadastrada'}</span></label></div><div class="form-section"><div class="form-section-title">Estoque e custo</div><div class="form-grid"><label>Estoque atual<input id="p-stock" type="number" min="0" step="0.001" value="${p?.currentStock ?? 0}" ${isNew ? '' : 'disabled'} /></label><label>Estoque mínimo<input id="p-min" type="number" min="0" step="0.001" value="${p?.minimumStock ?? state.config.defaultMinimumStock}" /></label></div><div class="form-grid"><label>Custo atual<input id="p-cost" type="number" min="0" step="0.01" value="${p?.currentCost ?? 0}" /></label><label>Estoque máximo<input id="p-max" type="number" min="0" step="0.001" value="${p?.maximumStock ?? ''}" placeholder="Opcional" /></label></div></div>
     ${!isNew ? `<div class="form-section"><div class="detail-strip"><div><span>Disponível</span><b>${qty(Math.max(0, p.currentStock - p.reservedStock))}</b></div><div><span>Valor estoque</span><b>${money(p.currentStock * p.currentCost)}</b></div><div><span>Status</span><b class="${statusClass(statusFor(p))}">${statusLabel(statusFor(p))}</b></div></div></div>` : ''}
   </div><div class="drawer-foot">${!isNew ? `<button class="btn btn-danger ghost" data-action="delete-product" data-id="${p.id}">${icon('trash', 15)} Excluir</button>` : '<span></span>'}<div><button class="btn btn-secondary" data-action="close-drawer">Cancelar</button><button class="btn btn-primary" data-action="save-product" data-id="${p?.id || ''}">${icon('check', 15)} ${isNew ? 'Criar produto' : 'Salvar alterações'}</button></div></div></aside></div>`;
-    const root = document.getElementById('drawer-root');
+    const root = $id('drawer-root');
     root.innerHTML = html;
-    requestAnimationFrame(() => root.querySelector('.drawer-overlay')?.classList.add('open'));
+    requestAnimationFrame(() => $q(root, '.drawer-overlay')?.classList.add('open'));
 }
-function openSupplierDrawer(supplierId) { const s = supplierId ? getSupplier(supplierId) : undefined; const ps = state.products.filter(p => p.supplierId === supplierId); const html = `<div class="drawer-overlay" data-action="close-drawer"><aside class="drawer" data-stop><div class="drawer-head"><div><div class="eyebrow">FORNECEDOR</div><h2>${s ? esc(s.name) : 'Novo fornecedor'}</h2><p>${s ? esc(s.cnpj || 'Cadastro sem CNPJ') : 'Dados de contato e compra'}</p></div><button class="icon-btn" data-action="close-drawer">${icon('close', 20)}</button></div><div class="drawer-body"><div class="form-section"><div class="form-section-title">Identificação</div><label>Nome *<input id="s-name" value="${esc(s?.name || '')}" /></label><div class="form-grid"><label>CNPJ<input id="s-cnpj" value="${esc(s?.cnpj || '')}" /></label><label>Contato<input id="s-contact" value="${esc(s?.contact || '')}" /></label></div><div class="form-grid"><label>Telefone<input id="s-phone" value="${esc(s?.phone || '')}" /></label><label>WhatsApp<input id="s-whatsapp" value="${esc(s?.whatsapp || '')}" /></label></div><label>E-mail<input id="s-email" value="${esc(s?.email || '')}" /></label><div class="form-grid"><label>Prazo médio (dias)<input id="s-lead" type="number" min="0" value="${s?.averageLeadDays ?? ''}" /></label><label>Condição pagamento<input id="s-payment" value="${esc(s?.paymentTerms || '')}" /></label></div></div>${s ? `<div class="form-section"><div class="form-section-title">Produtos vinculados</div>${ps.slice(0, 12).map(p => `<button class="mini-product-row" data-product="${p.id}"><span>${esc(p.name)}<small>${esc(p.code)}</small></span><b>${money(p.currentCost)}</b>${icon('arrow', 14)}</button>`).join('') || '<span class="muted">Nenhum produto vinculado.</span>'}</div>` : ''}</div><div class="drawer-foot">${s ? `<button class="btn btn-danger ghost" data-action="delete-supplier" data-id="${s.id}">${icon('trash', 15)} Desativar</button>` : '<span></span>'}<div><button class="btn btn-secondary" data-action="close-drawer">Cancelar</button><button class="btn btn-primary" data-action="save-supplier" data-id="${s?.id || ''}">${icon('check', 15)} Salvar fornecedor</button></div></div></aside></div>`; const root = document.getElementById('drawer-root'); root.innerHTML = html; requestAnimationFrame(() => root.querySelector('.drawer-overlay')?.classList.add('open')); }
+function openSupplierDrawer(supplierId?: string) { const s = supplierId ? getSupplier(supplierId) : undefined; const ps = state.products.filter(p => p.supplierId === supplierId); const html = `<div class="drawer-overlay" data-action="close-drawer"><aside class="drawer" data-stop><div class="drawer-head"><div><div class="eyebrow">FORNECEDOR</div><h2>${s ? esc(s.name) : 'Novo fornecedor'}</h2><p>${s ? esc(s.cnpj || 'Cadastro sem CNPJ') : 'Dados de contato e compra'}</p></div><button class="icon-btn" data-action="close-drawer">${icon('close', 20)}</button></div><div class="drawer-body"><div class="form-section"><div class="form-section-title">Identificação</div><label>Nome *<input id="s-name" value="${esc(s?.name || '')}" /></label><div class="form-grid"><label>CNPJ<input id="s-cnpj" value="${esc(s?.cnpj || '')}" /></label><label>Contato<input id="s-contact" value="${esc(s?.contact || '')}" /></label></div><div class="form-grid"><label>Telefone<input id="s-phone" value="${esc(s?.phone || '')}" /></label><label>WhatsApp<input id="s-whatsapp" value="${esc(s?.whatsapp || '')}" /></label></div><label>E-mail<input id="s-email" value="${esc(s?.email || '')}" /></label><div class="form-grid"><label>Prazo médio (dias)<input id="s-lead" type="number" min="0" value="${s?.averageLeadDays ?? ''}" /></label><label>Condição pagamento<input id="s-payment" value="${esc(s?.paymentTerms || '')}" /></label></div></div>${s ? `<div class="form-section"><div class="form-section-title">Produtos vinculados</div>${ps.slice(0, 12).map(p => `<button class="mini-product-row" data-product="${p.id}"><span>${esc(p.name)}<small>${esc(p.code)}</small></span><b>${money(p.currentCost)}</b>${icon('arrow', 14)}</button>`).join('') || '<span class="muted">Nenhum produto vinculado.</span>'}</div>` : ''}</div><div class="drawer-foot">${s ? `<button class="btn btn-danger ghost" data-action="delete-supplier" data-id="${s.id}">${icon('trash', 15)} Desativar</button>` : '<span></span>'}<div><button class="btn btn-secondary" data-action="close-drawer">Cancelar</button><button class="btn btn-primary" data-action="save-supplier" data-id="${s?.id || ''}">${icon('check', 15)} Salvar fornecedor</button></div></div></aside></div>`; const root = $id('drawer-root'); root.innerHTML = html; requestAnimationFrame(() => $q(root, '.drawer-overlay')?.classList.add('open')); }
 function openMovementModal() { const products = state.products.filter(p => p.active).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')); showModal('Nova movimentação', `<div class="modal-grid"><label>Produto<select id="m-product">${products.map(p => `<option value="${p.id}">${esc(p.name)} · ${qty(p.currentStock)} ${esc(p.unit)}</option>`).join('')}</select></label><label>Tipo<select id="m-type"><option value="entrada">Entrada</option><option value="saida">Saída</option><option value="ajuste">Ajuste de saldo</option><option value="devolucao">Devolução</option><option value="transferencia">Transferência</option></select></label></div><div class="modal-grid"><label>Quantidade<input id="m-qty" type="number" min="0.001" step="0.001" value="1" /></label><label>Custo unitário<input id="m-cost" type="number" min="0" step="0.01" value="0" /></label></div><div class="modal-grid"><label>Documento<input id="m-doc" placeholder="NF-e, OS, inventário..." /></label><label>Responsável<input id="m-resp" placeholder="Nome" /></label></div><div class="modal-grid"><label>Ordem de serviço<input id="m-os" placeholder="Opcional" /></label><label>Veículo<input id="m-vehicle" placeholder="Opcional" /></label></div><label>Observação<textarea id="m-note" rows="3" placeholder="Motivo, origem ou destino..."></textarea></label><div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Cancelar</button><button class="btn btn-primary" data-action="save-movement">${icon('check', 15)} Registrar</button></div>`); }
 function openQuoteModal() {
     const products = state.products.filter(p => p.active);
     showModal('Novo orçamento', `<div class="modal-grid"><label>Cliente<input id="q-customer" placeholder="Cliente / empresa" /></label><label>Validade<input id="q-valid" type="date" /></label></div><label>Título<input id="q-title" placeholder="Ex.: Materiais para recuperação - OS 1234" /></label><label>Adicionar produto<select id="q-product"><option value="">Selecione...</option>${products.map(p => `<option value="${p.id}">${esc(p.name)} · ${money(p.currentCost)}</option>`).join('')}</select></label><div id="q-cart" class="quote-cart-empty">Nenhum item.</div><label>Observações<textarea id="q-notes" rows="3"></textarea></label><div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Cancelar</button><button class="btn btn-primary" data-action="save-quote">${icon('check', 15)} Salvar orçamento</button></div>`);
     let cart = [];
-    const select = document.getElementById('q-product');
-    const cartEl = document.getElementById('q-cart');
+    const select = $id('q-product');
+    const cartEl = $id('q-cart');
     const paint = () => { cartEl.innerHTML = cart.length ? cart.map((x, i) => { const p = getProduct(x.productId); return `<div class="cart-row"><span>${esc(p.name)}<small>${money(x.unitPrice)} / un</small></span><input class="small-number" data-q-idx="${i}" type="number" min="1" step="1" value="${x.quantity}" /><b>${money(x.quantity * x.unitPrice)}</b><button class="icon-btn" data-q-remove="${i}">${icon('trash', 14)}</button></div>`; }).join('') : '<span class="muted">Nenhum item.</span>'; };
     select.addEventListener('change', () => { const id = select.value; if (!id)
         return; const p = getProduct(id); const existing = cart.find(i => i.productId === id); if (existing)
         existing.quantity += 1;
     else
         cart.push({ productId: id, quantity: 1, unitPrice: p.currentCost }); select.value = ''; paint(); });
-    cartEl.addEventListener('input', e => { const el = e.target.closest('[data-q-idx]'); if (el)
+    cartEl.addEventListener('input', e => { const el = (e.target as HTMLElement).closest('[data-q-idx]'); if (el)
         cart[Number(el.dataset.qIdx)].quantity = Math.max(1, Number(el.value) || 1); });
-    cartEl.addEventListener('click', e => { const el = e.target.closest('[data-q-remove]'); if (el) {
+    cartEl.addEventListener('click', e => { const el = (e.target as HTMLElement).closest('[data-q-remove]'); if (el) {
         cart.splice(Number(el.dataset.qRemove), 1);
         paint();
     } });
     window._quoteCart = () => cart;
 }
-function showModal(title, body) { const root = document.getElementById('modal-root'); root.innerHTML = `<div class="modal-overlay" data-action="close-modal"><div class="modal" data-stop><div class="modal-head"><div><div class="eyebrow">AÇÃO</div><h2>${title}</h2></div><button class="icon-btn" data-action="close-modal">${icon('close', 20)}</button></div><div class="modal-body">${body}</div></div></div>`; requestAnimationFrame(() => root.querySelector('.modal-overlay')?.classList.add('open')); }
+function showModal(title, body) { const root = $id('modal-root'); root.innerHTML = `<div class="modal-overlay" data-action="close-modal"><div class="modal" data-stop><div class="modal-head"><div><div class="eyebrow">AÇÃO</div><h2>${title}</h2></div><button class="icon-btn" data-action="close-modal">${icon('close', 20)}</button></div><div class="modal-body">${body}</div></div></div>`; requestAnimationFrame(() => $q(root, '.modal-overlay')?.classList.add('open')); }
 async function saveProduct(id) {
-    const name = document.getElementById('p-name').value.trim().toUpperCase();
+    const name = $id('p-name').value.trim().toUpperCase();
     if (!name) {
         toast('Nome do produto é obrigatório', 'error');
         return;
     }
-    const categoryId = document.getElementById('p-cat').value;
-    const supplierId = document.getElementById('p-sup').value || undefined;
-    const code = document.getElementById('p-code').value.trim() || '—';
-    const unit = document.getElementById('p-unit').value;
-    const min = Math.max(0, Number(document.getElementById('p-min').value) || 0);
-    const cost = Math.max(0, Number(document.getElementById('p-cost').value) || 0);
-    const maxValue = Number(document.getElementById('p-max').value);
+    const categoryId = $id('p-cat').value;
+    const supplierId = $id('p-sup').value || undefined;
+    const code = $id('p-code').value.trim() || '—';
+    const unit = $id('p-unit').value;
+    const min = Math.max(0, Number($id('p-min').value) || 0);
+    const cost = Math.max(0, Number($id('p-cost').value) || 0);
+    const maxValue = Number($id('p-max').value);
     const p = id ? getProduct(id) : undefined;
-    const photoFile = document.getElementById('p-photo')?.files?.[0] || pendingPhotoFile;
+    const photoFile = $id('p-photo')?.files?.[0] || pendingPhotoFile;
     let photoHash = p?.photoHash;
     if (photoFile) {
         try {
@@ -403,7 +397,7 @@ async function saveProduct(id) {
         }
     }
     if (!p) {
-        const newProduct = { id: uid('p'), code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, currentStock: Math.max(0, Number(document.getElementById('p-stock').value) || 0), minimumStock: min, reservedStock: 0, currentCost: cost, averageCost: cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual', photoHash, photoUpdatedAt: photoFile ? now() : undefined };
+        const newProduct: Product = { id: uid('p'), code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, currentStock: Math.max(0, Number($id('p-stock').value) || 0), minimumStock: min, reservedStock: 0, currentCost: cost, averageCost: cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual', photoHash, photoUpdatedAt: photoFile ? now() : undefined };
         await db.put('products', newProduct);
         if (photoFile) {
             await db.put('productMedia', {
@@ -443,18 +437,18 @@ async function saveProduct(id) {
 async function deleteProduct(id) { const p = getProduct(id); if (!p)
     return; if (!confirm(`Desativar “${p.name}”? O histórico será preservado.`))
     return; p.active = false; p.updatedAt = now(); await db.put('products', p); rebuildIndexes(); log('delete', `Produto desativado: ${p.name}`, 'Histórico preservado', 'product', p.id); closeDrawer(); renderPage(); toast('Produto desativado', 'warning'); }
-async function saveSupplier(id) { const name = document.getElementById('s-name').value.trim().toUpperCase(); if (!name) {
+async function saveSupplier(id) { const name = $id('s-name').value.trim().toUpperCase(); if (!name) {
     toast('Nome do fornecedor é obrigatório', 'error');
     return;
 } let s = id ? getSupplier(id) : undefined; if (!s) {
-    s = { id: uid('sup'), name, active: true, createdAt: now(), updatedAt: now(), cnpj: document.getElementById('s-cnpj').value.trim(), contact: document.getElementById('s-contact').value.trim(), phone: document.getElementById('s-phone').value.trim(), whatsapp: document.getElementById('s-whatsapp').value.trim(), email: document.getElementById('s-email').value.trim(), averageLeadDays: Math.max(0, Number(document.getElementById('s-lead').value) || 0), paymentTerms: document.getElementById('s-payment').value.trim() };
+    s = { id: uid('sup'), name, active: true, createdAt: now(), updatedAt: now(), cnpj: $id('s-cnpj').value.trim(), contact: $id('s-contact').value.trim(), phone: $id('s-phone').value.trim(), whatsapp: $id('s-whatsapp').value.trim(), email: $id('s-email').value.trim(), averageLeadDays: Math.max(0, Number($id('s-lead').value) || 0), paymentTerms: $id('s-payment').value.trim() };
     state.suppliers.push(s);
     await db.put('suppliers', s);
     rebuildIndexes();
     log('create', `Fornecedor criado: ${name}`, '');
 }
 else {
-    Object.assign(s, { name, cnpj: document.getElementById('s-cnpj').value.trim(), contact: document.getElementById('s-contact').value.trim(), phone: document.getElementById('s-phone').value.trim(), whatsapp: document.getElementById('s-whatsapp').value.trim(), email: document.getElementById('s-email').value.trim(), averageLeadDays: Math.max(0, Number(document.getElementById('s-lead').value) || 0), paymentTerms: document.getElementById('s-payment').value.trim(), updatedAt: now() });
+    Object.assign(s, { name, cnpj: $id('s-cnpj').value.trim(), contact: $id('s-contact').value.trim(), phone: $id('s-phone').value.trim(), whatsapp: $id('s-whatsapp').value.trim(), email: $id('s-email').value.trim(), averageLeadDays: Math.max(0, Number($id('s-lead').value) || 0), paymentTerms: $id('s-payment').value.trim(), updatedAt: now() });
     await db.put('suppliers', s);
     log('update', `Fornecedor alterado: ${name}`, 'Cadastro atualizado', 'supplier', s.id);
 } closeDrawer(); renderPage(); toast('Fornecedor salvo'); }
@@ -462,13 +456,13 @@ async function deleteSupplier(id) { const s = getSupplier(id); if (!s)
     return; if (!confirm(`Desativar ${s.name}?`))
     return; s.active = false; s.updatedAt = now(); await db.put('suppliers', s); log('delete', `Fornecedor desativado: ${s.name}`, 'Produtos vinculados permanecem cadastrados.', 'supplier', id); closeDrawer(); renderPage(); toast('Fornecedor desativado', 'warning'); }
 async function saveMovement() {
-    const product = getProduct(document.getElementById('m-product').value);
+    const product = getProduct($id('m-product').value);
     if (!product) {
         toast('Produto inválido', 'error');
         return;
     }
-    const type = document.getElementById('m-type').value;
-    const amount = Math.max(0, Number(document.getElementById('m-qty').value) || 0);
+    const type = $id('m-type').value as MovementType;
+    const amount = Math.max(0, Number($id('m-qty').value) || 0);
     if (!(amount > 0)) {
         toast('Informe uma quantidade válida', 'error');
         return;
@@ -481,11 +475,11 @@ async function saveMovement() {
         allowNegativeStock: state.config.allowNegativeStock,
     });
     if (!validation.ok) {
-        toast(validation.message, 'error');
+        toast('message' in validation ? validation.message : 'Movimentação inválida.', 'error');
         return;
     }
     const next = validation.nextStock;
-    const cost = Math.max(0, Number(document.getElementById('m-cost').value) || product.currentCost);
+    const cost = Math.max(0, Number($id('m-cost').value) || product.currentCost);
     if (type === 'entrada' && amount > 0 && cost > 0) {
         product.averageCost = calculateWeightedAverageCost(current, product.averageCost, amount, cost);
         product.currentCost = cost;
@@ -493,7 +487,7 @@ async function saveMovement() {
     }
     product.currentStock = next;
     product.updatedAt = now();
-    const m = { id: uid('mov'), productId: product.id, productCode: product.code, productName: product.name, type, quantity: amount, unitCost: cost, document: document.getElementById('m-doc').value.trim(), responsible: document.getElementById('m-resp').value.trim(), workOrder: document.getElementById('m-os').value.trim(), vehicle: document.getElementById('m-vehicle').value.trim(), note: document.getElementById('m-note').value.trim(), createdAt: now() };
+    const m: Movement = { id: uid('mov'), productId: product.id, productCode: product.code, productName: product.name, type, quantity: amount, unitCost: cost, document: $id('m-doc').value.trim(), responsible: $id('m-resp').value.trim(), workOrder: $id('m-os').value.trim(), vehicle: $id('m-vehicle').value.trim(), note: $id('m-note').value.trim(), createdAt: now() };
     state.movements.unshift(m);
     await db.put('movements', m);
     await db.put('products', product);
@@ -504,7 +498,7 @@ async function saveMovement() {
 }
 const typeLabel = movementTypeLabel;
 async function saveInventory() {
-    const inputs = [...document.querySelectorAll('.inventory-input')];
+    const inputs = [...$qa(document, '.inventory-input')];
     const changes = [];
 
     for (const input of inputs) {
@@ -529,7 +523,7 @@ async function saveInventory() {
         product.currentStock = counted;
         product.updatedAt = now();
 
-        const movement = {
+        const movement: Movement = {
             id: uid('mov'),
             productId: product.id,
             productCode: product.code,
@@ -552,7 +546,7 @@ async function saveInventory() {
     toast(count ? `${count} ajustes registrados` : 'Nenhuma diferença para ajustar', count ? 'success' : 'warning');
     renderPage();
 }
-async function saveQuote() { const cart = (window._quoteCart?.() ?? []); const q = { id: uid('quote'), number: `ORC-${new Date().getFullYear()}-${String(state.quotes.length + 1).padStart(4, '0')}`, customer: document.getElementById('q-customer').value.trim(), title: document.getElementById('q-title').value.trim() || 'Orçamento', validUntil: document.getElementById('q-valid').value || undefined, status: 'draft', notes: document.getElementById('q-notes').value.trim(), items: cart, createdAt: now(), updatedAt: now() }; state.quotes.unshift(q); await db.put('quotes', q); log('create', `Orçamento criado: ${q.number}`, `${q.items.length} itens · ${money(quoteTotal(q))}`, 'quote', q.id); closeModal(); renderPage(); toast('Orçamento salvo'); }
+async function saveQuote() { const cart = (window._quoteCart?.() ?? []); const q: Quote = { id: uid('quote'), number: `ORC-${new Date().getFullYear()}-${String(state.quotes.length + 1).padStart(4, '0')}`, customer: $id('q-customer').value.trim(), title: $id('q-title').value.trim() || 'Orçamento', validUntil: $id('q-valid').value || undefined, status: 'draft', notes: $id('q-notes').value.trim(), items: cart, createdAt: now(), updatedAt: now() }; state.quotes.unshift(q); await db.put('quotes', q); log('create', `Orçamento criado: ${q.number}`, `${q.items.length} itens · ${money(quoteTotal(q))}`, 'quote', q.id); closeModal(); renderPage(); toast('Orçamento salvo'); }
 function openNfeDetail(nfeId) { const n = state.nfe.find(x => x.id === nfeId); if (!n)
     return; const items = state.nfeItems.filter(i => i.nfeId === n.id); const profile = n.readerProfile === 'danfe' ? 'DANFE' : n.readerProfile === 'pedido' ? 'Pedido' : n.readerProfile === 'orcamento' ? 'Orçamento' : n.readerProfile === 'generic' ? 'Documento genérico' : 'Não identificado'; const review = items.filter(i => i.status === 'review').length; const canProcess = n.status !== 'processed' && n.status !== 'cancelled' && items.length > 0; const footer = `<div class="modal-actions nfe-modal-actions"><button class="btn btn-secondary" data-action="close-modal">Fechar</button>${n.status === 'cancelled' ? `<button class="btn btn-secondary" data-action="reopen-nfe" data-id="${n.id}">${icon('refresh', 15)} Reabrir revisão</button>` : n.status !== 'processed' ? `<button class="btn btn-danger ghost" data-action="delete-nfe" data-id="${n.id}">${icon('trash', 15)} Excluir nota</button><button class="btn btn-secondary" data-action="cancel-nfe" data-id="${n.id}">${icon('close', 15)} Cancelar revisão</button>` : ''}${canProcess ? `<button class="btn btn-primary" data-action="process-nfe" data-id="${n.id}">${icon('check', 15)} Confirmar entrada</button>` : ''}</div>`; showModal('Revisar documento', `<div class="detail-grid"><div><span>Status</span><b>${esc(n.status)}</b></div><div><span>Leitura</span><b>${esc(profile)}${n.readerConfidence ? ` · ${Math.round(n.readerConfidence * 100)}%` : ''}</b></div><div><span>Fornecedor</span><b>${esc(n.supplierName || '—')}</b></div><div><span>Número</span><b>${esc(n.number || '—')}</b></div><div><span>Itens</span><b>${items.length}</b></div><div><span>Revisão</span><b>${review ? review + ' item(ns)' : 'Nenhum item pendente'}</b></div></div>${n.parseWarnings?.length ? `<div class="data-note"><span>${icon('alert', 17)}</span><p><b>Alertas</b><br/>${n.parseWarnings.map(w => esc(w)).join('<br/>')}</p></div>` : ''}<div class="data-note"><span>${icon('file', 17)}</span><p><b>${esc(n.sourceName)}</b><br/>${esc(n.note || 'Documento pronto para conferência.')}</p></div>${items.length ? `<div class="modal-subtitle">Itens reconhecidos</div><div class="table-wrap mini-table"><table><thead><tr><th>Item</th><th>Código</th><th>Qtd.</th><th>Unit.</th><th>Confiança</th><th>Correspondência</th><th>Ação</th></tr></thead><tbody>${items.map(i => { const conf = Math.round((i.confidence ?? 0) * 100), m = Math.round((i.matchConfidence ?? 0) * 100), p = i.matchedProductId ? getProduct(i.matchedProductId) : undefined; const cls = conf >= 80 ? 'status-ok' : conf >= 60 ? 'status-low' : 'status-critical'; return `<tr><td><b>${esc(i.description)}</b><small>${i.warnings?.[0] ? esc(i.warnings[0]) : esc(i.sourceLine || '')}</small></td><td>${esc(i.code || '—')}</td><td>${qty(i.quantity)} ${esc(i.unit)}</td><td>${money(i.unitCost)}</td><td><span class="status ${cls}"><i></i>${conf}%</span></td><td><span class="status ${p ? 'status-ok' : 'status-low'}"><i></i>${p ? esc(p.name) : 'Novo'}${m ? ` · ${m}%` : ''}</span></td><td><span class="status ${i.status === 'review' ? 'status-low' : i.status === 'skip' ? 'status-critical' : 'status-ok'}"><i></i>${i.status === 'review' ? 'Revisar' : i.status === 'skip' ? 'Ignorado' : i.status === 'new' ? 'Novo' : 'Pronto'}</span></td></tr>`; }).join('')}</tbody></table></div>` : ''}${footer}`); }
 async function setNfeItemStatus(id, status) { const item = state.nfeItems.find(i => i.id === id); if (!item)
@@ -611,7 +605,7 @@ async function processNfe(id) { const n = state.nfe.find(x => x.id === id); if (
         p.lastPurchaseAt = n.issueDate || now();
         p.updatedAt = now();
         await db.put('products', p);
-        const m = { id: uid('mov'), productId: p.id, productCode: p.code, productName: p.name, type: 'entrada', quantity: amount, unitCost: cost, document: n.number || n.key || n.sourceName, note: `Importação inteligente · ${n.readerProfile || 'documento'} · ${item.matchMethod || 'sem-match'}`, createdAt: now() };
+        const m: Movement = { id: uid('mov'), productId: p.id, productCode: p.code, productName: p.name, type: 'entrada', quantity: amount, unitCost: cost, document: n.number || n.key || n.sourceName, note: `Importação inteligente · ${n.readerProfile || 'documento'} · ${item.matchMethod || 'sem-match'}`, createdAt: now() };
         state.movements.unshift(m);
         await db.put('movements', m);
         item.status = 'update';
@@ -619,8 +613,8 @@ async function processNfe(id) { const n = state.nfe.find(x => x.id === id); if (
         updated++;
     }
 } rebuildIndexes(); n.status = 'processed'; n.note = `Processado: ${updated} movimentos · ${created} novos produtos.`; await db.put('nfe', n); log('import', `Documento processado: ${n.sourceName}`, `${updated} movimentos · ${created} novos produtos`, 'nfe', id); closeModal(); renderPage(); toast(`Entrada confirmada: ${updated} movimentos · ${created} novos`, 'success'); }
-function scanCode() { showModal('Consultar código', `<div class="scan-box"><div class="scan-visual">${icon('barcode', 56)}</div><p>Digite ou cole o código interno/EAN. Em navegadores que suportam BarcodeDetector, o leitor por câmera pode ser adicionado ao adaptador PWA.</p><label>Código<input id="scan-code" autofocus placeholder="Ex.: 7891645083014" /></label><div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Cancelar</button><button class="btn btn-primary" data-action="lookup-code">${icon('search', 15)} Consultar</button></div></div>`); setTimeout(() => document.getElementById('scan-code')?.focus(), 50); }
-function lookupCode() { const code = document.getElementById('scan-code')?.value.trim(); if (!code)
+function scanCode() { showModal('Consultar código', `<div class="scan-box"><div class="scan-visual">${icon('barcode', 56)}</div><p>Digite ou cole o código interno/EAN. Em navegadores que suportam BarcodeDetector, o leitor por câmera pode ser adicionado ao adaptador PWA.</p><label>Código<input id="scan-code" autofocus placeholder="Ex.: 7891645083014" /></label><div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Cancelar</button><button class="btn btn-primary" data-action="lookup-code">${icon('search', 15)} Consultar</button></div></div>`); setTimeout(() => $id('scan-code')?.focus(), 50); }
+function lookupCode() { const code = $id('scan-code')?.value.trim(); if (!code)
     return toast('Informe um código', 'warning'); const p = state.products.find(x => x.code === code); if (!p) {
     toast('Código não encontrado', 'error');
     return;
@@ -919,7 +913,7 @@ function extractMetadata(rawText) {
     }
     return { number, key, cnpj, issueDate, total, supplierName };
 }
-function analyzeTextDocument(rawText, explicitProfile) {
+function analyzeTextDocument(rawText, explicitProfile?: 'danfe' | 'pedido' | 'orcamento' | 'generic') {
     const normalized = rawText.replace(/\r/g, '').replace(/[\u00A0\t]+/g, ' ');
     const lines = normalized.split('\n').map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
     const profileInfo = explicitProfile ? { profile: explicitProfile, confidence: 1 } : detectProfile(normalized, lines);
@@ -987,7 +981,7 @@ async function readPdfSmartStandalone(file) {
     }
     if (!wordCount) {
         return {
-            profile: 'generic', profileConfidence: 0, pages: pdf.numPages, rawText: '', metadata: {}, items: [],
+            profile: 'generic', profileConfidence: 0, pages: pdf.numPages, rawText: '', metadata: { number: undefined, key: undefined, cnpj: undefined, issueDate: undefined, total: undefined, supplierName: undefined }, items: [],
             warnings: ['O PDF não contém texto selecionável. Ele provavelmente é um PDF escaneado/imagem e precisa de OCR.']
         };
     }
@@ -998,7 +992,7 @@ async function readPdfSmartStandalone(file) {
 async function parsePdfMetadata(file) { return readPdfSmartStandalone(file); }
 async function imageDHash(blob) { const w = 9, h = 8; const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; const ctx = canvas.getContext('2d', { willReadFrequently: true }); if (!ctx)
     throw new Error('Canvas não disponível'); const url = URL.createObjectURL(blob); try {
-    const img = await new Promise((resolve, reject) => { const el = new Image(); el.onload = () => resolve(el); el.onerror = () => reject(new Error('Imagem inválida.')); el.src = url; });
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => { const el = new Image(); el.onload = () => resolve(el); el.onerror = () => reject(new Error('Imagem inválida.')); el.src = url; });
     ctx.drawImage(img, 0, 0, w, h);
     const data = ctx.getImageData(0, 0, w, h).data;
     let bits = '';
@@ -1089,7 +1083,7 @@ else if (!m.product && ex < .62)
 async function importTextOrder(text, name) { const result = analyzeTextDocument(text); if (!result.items.length) {
     toast('Nenhum item identificável no pedido. Revise o texto ou use CSV.', 'error');
     return;
-} const n = { id: uid('nfe'), sourceName: name, sourceType: 'manual', status: 'review', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile, readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: `Leitura inteligente de texto · ${result.profile}` }; const items = applyImportedItems(result.items, n.id); state.nfe.unshift(n); state.nfeItems.push(...items); await db.put('nfe', n); await db.bulkPut('nfeItems', items); log('import', `Pedido importado: ${name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id); toast(`${items.length} itens reconhecidos`, 'success'); renderPage(); }
+} const n: NfeDocument = { id: uid('nfe'), sourceName: name, sourceType: 'manual', status: 'review', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile as NfeDocument['readerProfile'], readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: `Leitura inteligente de texto · ${result.profile}` }; const items = applyImportedItems(result.items, n.id); state.nfe.unshift(n); state.nfeItems.push(...items); await db.put('nfe', n); await db.bulkPut('nfeItems', items); log('import', `Pedido importado: ${name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id); toast(`${items.length} itens reconhecidos`, 'success'); renderPage(); }
 async function importFile(file) { const ext = file.name.split('.').pop()?.toLowerCase(); if (ext === 'json') {
     try {
         await importSnapshot(JSON.parse(await file.text()), file.name);
@@ -1107,7 +1101,7 @@ else if (ext === 'txt' || file.type === 'text/plain') {
 else if (ext === 'pdf' || file.type === 'application/pdf') {
     try {
         const result = await parsePdfMetadata(file);
-        const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: result.items.length ? 'review' : 'error', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile, readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: result.items.length ? `Leitura inteligente: ${result.profile} · ${result.items.length} itens.` : 'Nenhum item reconhecido automaticamente.' };
+        const n: NfeDocument = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: result.items.length ? 'review' : 'error', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile as NfeDocument['readerProfile'], readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: result.items.length ? `Leitura inteligente: ${result.profile} · ${result.items.length} itens.` : 'Nenhum item reconhecido automaticamente.' };
         const items = applyImportedItems(result.items, n.id);
         state.nfe.unshift(n);
         state.nfeItems.push(...items);
@@ -1128,7 +1122,7 @@ else if (ext === 'pdf' || file.type === 'application/pdf') {
     }
     catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: 'error', createdAt: now(), parseWarnings: [message], note: 'Falha na leitura do PDF.' };
+        const n: NfeDocument = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: 'error', createdAt: now(), parseWarnings: [message], note: 'Falha na leitura do PDF.' };
         state.nfe.unshift(n);
         await db.put('nfe', n);
         await db.put('nfeFiles', {
@@ -1183,11 +1177,11 @@ async function importCsv(text, name) {
 
     const validation = validateImportedProducts(candidates);
     if (!validation.ok) {
-        toast(`CSV rejeitado: ${validation.errors.length} linha(s) inválida(s).`, 'error');
+        toast(`CSV rejeitado: ${'errors' in validation ? validation.errors.length : 0} linha(s) inválida(s).`, 'error');
         return;
     }
 
-    const n = {
+    const n: NfeDocument = {
         id: uid('nfe'),
         sourceName: name,
         sourceType: 'csv',
@@ -1213,9 +1207,9 @@ async function importCsv(text, name) {
             });
             if (!stockCheck.ok) {
                 n.status = 'error';
-                n.note = stockCheck.message;
+                n.note = 'message' in stockCheck ? stockCheck.message : 'Saldo inválido.';
                 await db.put('nfe', n);
-                toast(`Importação interrompida: ${stockCheck.message}`, 'error');
+                toast(`Importação interrompida: ${'message' in stockCheck ? stockCheck.message : 'Saldo inválido.'}`, 'error');
                 return;
             }
         }
@@ -1228,7 +1222,7 @@ async function importCsv(text, name) {
         await db.put('products', p);
 
         if (raw.currentStock > 0) {
-            const movement = {
+            const movement: Movement = {
                 id: uid('mov'),
                 productId: p.id,
                 productCode: p.code,
@@ -1267,7 +1261,7 @@ async function importSnapshot(parsed, name) {
 
     const validation = validateImportedProducts(rawProducts);
     if (!validation.ok) {
-        toast(`Backup rejeitado: ${validation.errors.length} registro(s) inválido(s).`, 'error');
+        toast(`Backup rejeitado: ${'errors' in validation ? validation.errors.length : 0} registro(s) inválido(s).`, 'error');
         return;
     }
 
@@ -1325,7 +1319,7 @@ async function importSnapshot(parsed, name) {
             supplierId = supplier.id;
         }
 
-        const product = {
+        const product: Product = {
             id: uid('p'),
             code,
             name: nameValue,
@@ -1396,19 +1390,19 @@ function quickSearchHtml(q = '') {
         return `<div class="quick-empty compact">${icon('search', 20)}<b>Nenhum resultado</b><span>Tente outro nome, código, fornecedor ou número da NF-e.</span></div>`;
     return `<div class="quick-results">${results.map(r => `<button class="quick-result" ${r.kind === 'product' ? `data-product="${r.id}"` : r.kind === 'supplier' ? `data-supplier="${r.id}"` : `data-nfe="${r.id}"`}><span class="quick-result-icon">${icon(r.icon, 17)}</span><span class="quick-result-text"><b>${esc(r.title)}</b><small>${esc(r.meta)}</small></span>${icon('arrow', 14)}</button>`).join('')}</div>`;
 }
-function commandPalette(initial = '') { showModal('Pesquisa rápida', `<div class="quick-search-wrap"><span class="quick-search-icon">${icon('search', 18)}</span><input id="command-search" class="quick-search-input" value="${esc(initial)}" autocomplete="off" placeholder="Digite produto, código, fornecedor ou NF-e..." /><kbd>ESC</kbd></div><div id="quick-search-results">${quickSearchHtml(initial)}</div>`); setTimeout(() => { const input = document.getElementById('command-search'); input?.focus(); input?.setSelectionRange(input.value.length, input.value.length); }, 40); }
-function updateQuickSearch() { const input = document.getElementById('command-search'); const root = document.getElementById('quick-search-results'); if (input && root)
+function commandPalette(initial = '') { showModal('Pesquisa rápida', `<div class="quick-search-wrap"><span class="quick-search-icon">${icon('search', 18)}</span><input id="command-search" class="quick-search-input" value="${esc(initial)}" autocomplete="off" placeholder="Digite produto, código, fornecedor ou NF-e..." /><kbd>ESC</kbd></div><div id="quick-search-results">${quickSearchHtml(initial)}</div>`); setTimeout(() => { const input = $id('command-search'); input?.focus(); input?.setSelectionRange(input.value.length, input.value.length); }, 40); }
+function updateQuickSearch() { const input = $id('command-search'); const root = $id('quick-search-results'); if (input && root)
     root.innerHTML = quickSearchHtml(input.value); }
-function closeDrawer() { const root = document.getElementById('drawer-root'); if (!root)
-    return; const ov = root.querySelector('.drawer-overlay'); ov?.classList.remove('open'); setTimeout(() => root.innerHTML = '', 160); }
-function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
-async function applyConfig() { const negative = document.getElementById('cfg-negative')?.checked; const lite = document.getElementById('cfg-lite')?.checked; if (negative !== undefined) {
+function closeDrawer() { const root = $id('drawer-root'); if (!root)
+    return; const ov = $q(root, '.drawer-overlay'); ov?.classList.remove('open'); setTimeout(() => root.innerHTML = '', 160); }
+function closeModal() { $id('modal-root').innerHTML = ''; }
+async function applyConfig() { const negative = $id('cfg-negative')?.checked; const lite = $id('cfg-lite')?.checked; if (negative !== undefined) {
     state.config.allowNegativeStock = negative;
-    state.config.defaultMinimumStock = Math.max(0, Number(document.getElementById('cfg-min').value) || 0);
+    state.config.defaultMinimumStock = Math.max(0, Number($id('cfg-min').value) || 0);
     if (lite !== undefined)
         state.config.liteMode = lite;
     await db.put('config', state.config);
-    document.querySelector('.app-shell')?.classList.toggle('lite-mode', !!state.config.liteMode);
+    $q(document, '.app-shell')?.classList.toggle('lite-mode', !!state.config.liteMode);
     log('system', 'Configurações atualizadas', `Modo Lite: ${state.config.liteMode ? 'ativado' : 'desativado'}`);
     toast('Configurações salvas');
 } }
@@ -1427,11 +1421,11 @@ catch { } toast('Não foi possível compartilhar o acesso.', 'warning'); }
 function printReport() { window.print(); }
 function wire() {
     document.addEventListener('click', async (e) => {
-        const t = e.target;
+        const t = e.target as HTMLElement;
         const v = t.closest('[data-view]');
         if (v) {
             closeModal();
-            state.view = v.dataset.view;
+            state.view = v.dataset.view as View;
             state.mobileNav = false;
             renderPage();
             return;
@@ -1472,7 +1466,7 @@ function wire() {
         const action = a.dataset.action;
         if (NAV.some(n => n.id === action)) {
             closeModal();
-            state.view = action;
+            state.view = action as View;
             state.mobileNav = false;
             renderPage();
             return;
@@ -1485,26 +1479,26 @@ function wire() {
                 state.sidebarCollapsed = !state.sidebarCollapsed;
                 state.mobileNav = false;
             }
-            const shell = document.querySelector('.app-shell');
+            const shell = $q(document, '.app-shell');
             shell?.classList.toggle('sidebar-collapsed', state.sidebarCollapsed);
             shell?.classList.toggle('mobile-nav', state.mobileNav);
-            document.querySelector('.sidebar-backdrop')?.classList.toggle('open', state.mobileNav);
-            document.querySelector('.sidebar')?.classList.toggle('open', state.mobileNav);
+            $q(document, '.sidebar-backdrop')?.classList.toggle('open', state.mobileNav);
+            $q(document, '.sidebar')?.classList.toggle('open', state.mobileNav);
             return;
         }
         if (action === 'theme') {
             state.theme = state.theme === 'dark' ? 'light' : 'dark';
             state.config.theme = state.theme;
             await db.put('config', state.config);
-            const shell = document.querySelector('.app-shell');
+            const shell = $q(document, '.app-shell');
             shell?.classList.toggle('theme-light', state.theme === 'light');
-            const tb = document.querySelector('[data-action=theme]');
+            const tb = $q(document, '[data-action=theme]');
             if (tb)
                 tb.innerHTML = state.theme === 'dark' ? icon('moon', 15) : icon('sun', 15);
             return;
         }
         if (action === 'photo-search') {
-            document.getElementById('photo-search-file')?.click();
+            $id('photo-search-file')?.click();
             return;
         }
         if (action === 'share-app') {
@@ -1540,11 +1534,11 @@ function wire() {
         }
         if (action === 'import-nfe' || action === 'nfe-drop') {
             closeModal();
-            document.getElementById('nfe-file')?.click();
+            $id('nfe-file')?.click();
             return;
         }
         if (action === 'import-backup') {
-            document.getElementById('global-file')?.click();
+            $id('global-file')?.click();
             return;
         }
         if (action === 'export-json') {
@@ -1649,7 +1643,7 @@ function wire() {
         return;
     } if (t.matches('.inventory-input')) {
         const p = getProduct(t.dataset.product || '');
-        const cell = document.querySelector(`[data-diff="${t.dataset.product}"]`);
+        const cell = $q(document, `[data-diff="${t.dataset.product}"]`);
         if (cell && p && t.value !== '') {
             const diff = Number(t.value) - p.currentStock;
             cell.textContent = (diff > 0 ? '+' : '') + qty(diff);
@@ -1691,13 +1685,13 @@ function wire() {
     else if (t.id?.startsWith('cfg-')) {
         applyConfig();
     } });
-    document.addEventListener('dragover', e => { const zone = e.target.closest('#nfe-drop'); if (zone) {
+    document.addEventListener('dragover', e => { const zone = (e.target as HTMLElement).closest('#nfe-drop'); if (zone) {
         e.preventDefault();
         zone.classList.add('dragging');
     } });
-    document.addEventListener('dragleave', e => { const zone = e.target.closest('#nfe-drop'); if (zone)
+    document.addEventListener('dragleave', e => { const zone = (e.target as HTMLElement).closest('#nfe-drop'); if (zone)
         zone.classList.remove('dragging'); });
-    document.addEventListener('drop', e => { const zone = e.target.closest('#nfe-drop'); if (zone) {
+    document.addEventListener('drop', e => { const zone = (e.target as HTMLElement).closest('#nfe-drop'); if (zone) {
         e.preventDefault();
         zone.classList.remove('dragging');
         const file = e.dataTransfer?.files?.[0];
@@ -1715,7 +1709,7 @@ function wire() {
 function mountHiddenInputs() { const a = document.createElement('input'); a.type = 'file'; a.id = 'global-file'; a.accept = '.json,.csv,.txt'; a.hidden = true; document.body.appendChild(a); const photo = document.createElement('input'); photo.type = 'file'; photo.id = 'photo-search-file'; photo.accept = 'image/*'; photo.setAttribute('capture', 'environment'); photo.hidden = true; document.body.appendChild(photo); }
 function handleStartAction() { const action = new URLSearchParams(location.search).get('action'); if (!action)
     return; history.replaceState(null, '', location.pathname); if (action === 'photo')
-    setTimeout(() => document.getElementById('photo-search-file')?.click(), 120);
+    setTimeout(() => $id('photo-search-file')?.click(), 120);
 else if (action === 'movement') {
     state.view = 'stock';
     renderPage();
@@ -1724,7 +1718,7 @@ else if (action === 'movement') {
 else if (action === 'nfe') {
     state.view = 'nfe';
     renderPage();
-    setTimeout(() => document.getElementById('nfe-file')?.click(), 120);
+    setTimeout(() => $id('nfe-file')?.click(), 120);
 } }
 async function init() {
     mountHiddenInputs();
@@ -1741,11 +1735,11 @@ async function init() {
         navigator.serviceWorker.register('/sw.js').catch(() => { });
 }
 let pageRenderFrame = 0;
-let pendingQueryCaret;
-function schedulePageRender(caret) { if (caret !== undefined)
+let pendingQueryCaret: number | undefined;
+function schedulePageRender(caret?: number) { if (caret !== undefined)
     pendingQueryCaret = caret; if (pageRenderFrame)
     return; pageRenderFrame = requestAnimationFrame(() => { pageRenderFrame = 0; renderPage(); if (pendingQueryCaret !== undefined) {
-    const input = document.getElementById('query');
+    const input = $id('query');
     if (input) {
         input.focus();
         const pos = Math.min(pendingQueryCaret, input.value.length);
@@ -1753,13 +1747,13 @@ function schedulePageRender(caret) { if (caret !== undefined)
     }
     pendingQueryCaret = undefined;
 } }); }
-function rebuildNavState() { document.querySelectorAll('.nav-item[data-view]').forEach(el => el.classList.toggle('active', el.dataset.view === state.view)); const badge = document.querySelector('.nav-item[data-view="nfe"] .nav-badge'); const pending = state.nfe.filter(n => n.status === 'new' || n.status === 'review').length; if (pending && badge)
+function rebuildNavState() { $qa(document, '.nav-item[data-view]').forEach(el => el.classList.toggle('active', (el as HTMLElement).dataset.view === state.view)); const badge = $q(document, '.nav-item[data-view="nfe"] .nav-badge'); const pending = state.nfe.filter(n => n.status === 'new' || n.status === 'review').length; if (pending && badge)
     badge.textContent = String(pending);
 else if (!pending && badge)
     badge.remove(); }
-function renderPage() { const page = document.querySelector('.page'); if (page)
+function renderPage() { const page = $q(document, '.page'); if (page)
     page.innerHTML = renderView(); rebuildNavState(); }
-function render() { document.getElementById('app').innerHTML = shell(); }
-init().catch(err => { document.getElementById('app').innerHTML = `<div style="padding:40px;font-family:system-ui;color:#fff;background:#0b1118;min-height:100vh"><h1>Não foi possível iniciar</h1><p>${esc(err?.message || err)}</p></div>`; });
+function render() { $id('app').innerHTML = shell(); }
+init().catch(err => { $id('app').innerHTML = `<div style="padding:40px;font-family:system-ui;color:#fff;background:#0b1118;min-height:100vh"><h1>Não foi possível iniciar</h1><p>${esc(err?.message || err)}</p></div>`; });
 
 export {};
