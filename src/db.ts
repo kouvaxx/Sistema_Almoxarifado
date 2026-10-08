@@ -135,14 +135,14 @@ class LocalDB {
       req.onerror = () => reject(req.error ?? new Error('Não foi possível abrir o banco local.'));
       req.onblocked = () => reject(new Error('A atualização do banco está bloqueada por outra aba aberta do sistema.'));
 
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = (event) => {
         const db = req.result;
         const transaction = req.transaction;
         if (!transaction) {
           throw new Error('Transação de migração do IndexedDB indisponível.');
         }
 
-        const oldVersion = req.oldVersion;
+        const oldVersion = (event as IDBVersionChangeEvent).oldVersion;
         createBaseSchema(db);
 
         if (oldVersion < 2) {
