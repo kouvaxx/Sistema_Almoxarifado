@@ -8,6 +8,7 @@ import { seedDatabase, tryLegacyMigration } from './app/bootstrap';
 import { nfePdfReader } from './app/nfe-pdf-reader';
 import { dispatchImport } from './app/import-service';
 import { registerStockMovement } from './app/stock-service';
+import { processNfeDocument } from './app/nfe-processing-service';
 import { CATEGORY_META } from './seed';
 import {
   calculateWeightedAverageCost,
@@ -506,57 +507,29 @@ async function cancelNfe(id) { const n = state.nfe.find(x => x.id === id); if (!
     return; n.status = 'cancelled'; n.note = `Revisão cancelada em ${dateTime(now())}.`; await repository.saveNfe(n); log('update', `Revisão cancelada: ${n.sourceName}`, 'Documento mantido para histórico', 'nfe', id); closeModal(); renderPage(); toast('Revisão cancelada', 'warning'); }
 async function reopenNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n || n.status !== 'cancelled')
     return; n.status = 'review'; n.note = `Revisão reaberta em ${dateTime(now())}.`; await repository.saveNfe(n); log('update', `Revisão reaberta: ${n.sourceName}`, 'Documento voltou para conferência', 'nfe', id); closeModal(); openNfeDetail(id); }
-async function processNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n)
-    return; if (n.status === 'processed') {
-    toast('Este documento já foi processado.', 'warning');
-    return;
-} if (n.status === 'cancelled') {
-    toast('Reabra a revisão antes de processar.', 'warning');
-    return;
-} const items = state.nfeItems.filter(i => i.nfeId === id && i.status !== 'skip'); const pending = items.filter(i => i.status === 'review'); if (pending.length) {
-    toast(`Ainda há ${pending.length} item(ns) para revisar. Aceite ou ignore os itens sinalizados.`, 'warning');
-    return;
-} if (!items.length) {
-    toast('Nenhum item selecionado para entrada.', 'warning');
-    return;
-} let created = 0, updated = 0; for (const item of items) {
-    let p = item.matchedProductId ? getProduct(item.matchedProductId) : undefined;
-    if (!p && item.status === 'new') {
-        let supId;
-        if (n.supplierName) {
-            let sup = state.suppliers.find(s => norm(s.name) === norm(n.supplierName));
-            if (!sup) {
-                sup = { id: uid('sup'), name: n.supplierName, active: true, createdAt: now(), updatedAt: now() };
-                state.suppliers.push(sup);
-                await repository.saveSupplier(sup);
-            }
-            supId = sup.id;
-        }
-        const cat = state.categories.find(c => c.name === 'Outros') || state.categories[0];
-        p = { id: uid('p'), code: item.code || '—', name: item.description.toUpperCase(), supplierId: supId, supplierNameLegacy: n.supplierName || '', categoryId: cat?.id || '', unit: item.unit || 'un', currentStock: 0, minimumStock: state.config.defaultMinimumStock, reservedStock: 0, currentCost: item.unitCost || 0, averageCost: item.unitCost || 0, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual' };
-        state.products.unshift(p);
-        item.matchedProductId = p.id;
-        await repository.saveProduct(p);
-        created++;
+async function processNfe(id) {
+    const n = state.nfe.find(x => x.id === id);
+    if (!n)
+        return;
+    const result = await processNfeDocument({
+        nfe: n,
+        items: state.nfeItems.filter(item => item.nfeId === id),
+        products: state.products,
+        suppliers: state.suppliers,
+        categories: state.categories,
+        config: state.config,
+    });
+    if ('message' in result) {
+        toast(result.message, 'warning');
+        return;
     }
-    if (!p)
-        continue;
-    const amount = Math.max(0, item.quantity || 0), cost = item.unitCost || p.currentCost, current = p.currentStock;
-    if (amount > 0) {
-        p.averageCost = (p.averageCost * current + cost * amount) / (current + amount || 1);
-        p.currentCost = cost;
-        p.currentStock = current + amount;
-        p.lastPurchaseAt = n.issueDate || now();
-        p.updatedAt = now();
-        await repository.saveProduct(p);
-        const m: Movement = { id: uid('mov'), productId: p.id, productCode: p.code, productName: p.name, type: 'entrada', quantity: amount, unitCost: cost, document: n.number || n.key || n.sourceName, note: `Importação inteligente · ${n.readerProfile || 'documento'} · ${item.matchMethod || 'sem-match'}`, createdAt: now() };
-        state.movements.unshift(m);
-        await repository.saveMovement(m);
-        item.status = 'update';
-        await repository.saveNfeItem(item);
-        updated++;
-    }
-} rebuildIndexes(); n.status = 'processed'; n.note = `Processado: ${updated} movimentos · ${created} novos produtos.`; await repository.saveNfe(n); log('import', `Documento processado: ${n.sourceName}`, `${updated} movimentos · ${created} novos produtos`, 'nfe', id); closeModal(); renderPage(); toast(`Entrada confirmada: ${updated} movimentos · ${created} novos`, 'success'); }
+    state.movements.unshift(...result.movements);
+    rebuildIndexes();
+    log('import', `Documento processado: ${n.sourceName}`, `${result.updatedProductCount} movimentos · ${result.createdProductCount} novos produtos`, 'nfe', id);
+    closeModal();
+    renderPage();
+    toast(`Entrada confirmada: ${result.updatedProductCount} movimentos · ${result.createdProductCount} novos`, 'success');
+}
 function scanCode() { showModal('Consultar código', `<div class="scan-box"><div class="scan-visual">${icon('barcode', 56)}</div><p>Digite ou cole o código interno/EAN. Em navegadores que suportam BarcodeDetector, o leitor por câmera pode ser adicionado ao adaptador PWA.</p><label>Código<input id="scan-code" autofocus placeholder="Ex.: 7891645083014" /></label><div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Cancelar</button><button class="btn btn-primary" data-action="lookup-code">${icon('search', 15)} Consultar</button></div></div>`); setTimeout(() => $id('scan-code')?.focus(), 50); }
 function lookupCode() { const code = $id('scan-code')?.value.trim(); if (!code)
     return toast('Informe um código', 'warning'); const p = state.products.find(x => x.code === code); if (!p) {
