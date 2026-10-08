@@ -44,6 +44,8 @@ export interface Product {
   createdAt: string;
   updatedAt: string;
   legacySource?: 'v8-seed' | 'v8-import' | 'manual';
+  photoHash?: string;
+  photoUpdatedAt?: string;
 }
 
 export interface Movement {
@@ -73,6 +75,10 @@ export interface NfeItem {
   matchedProductId?: string;
   confidence?: number;
   status: 'new' | 'update' | 'skip' | 'review';
+  matchConfidence?: number;
+  matchMethod?: string;
+  sourceLine?: string;
+  warnings?: string[];
 }
 
 export interface NfeDocument {
@@ -85,10 +91,30 @@ export interface NfeDocument {
   total?: number;
   sourceName: string;
   sourceType: 'pdf' | 'json' | 'csv' | 'manual';
-  status: 'new' | 'review' | 'processed' | 'error';
+  status: 'new' | 'review' | 'processed' | 'error' | 'cancelled';
   createdAt: string;
   note?: string;
-  fileBlob?: Blob;
+  readerProfile?: 'danfe' | 'pedido' | 'orcamento' | 'generic';
+  readerConfidence?: number;
+  parseWarnings?: string[];
+}
+
+export interface NfeFile {
+  id: string;
+  nfeId: string;
+  blob: Blob;
+  mimeType: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface ProductMedia {
+  id: string;
+  productId: string;
+  blob: Blob;
+  mimeType: string;
+  name: string;
+  updatedAt: string;
 }
 
 export interface QuoteItem {
@@ -130,6 +156,7 @@ export interface AppConfig {
   lastBackupAt?: string;
   initializedAt: string;
   schemaVersion: number;
+  liteMode?: boolean;
 }
 
 export interface DatabaseSnapshot {
