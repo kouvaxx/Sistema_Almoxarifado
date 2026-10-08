@@ -14,7 +14,7 @@ import {
   validateInventoryCount,
   validateStockMovement,
 } from './domain/validation';
-import type { AuditEntry, MovementType } from './types';
+import type { AuditEntry, Movement, MovementType, NfeDocument, Product, Quote } from './types';
 
 // A implementação abaixo foi restaurada a partir da versão funcional v9.2 autocontida.
 // A etapa seguinte do roadmap deve separar UI, domínio e persistência sem alterar seu comportamento.
@@ -397,7 +397,7 @@ async function saveProduct(id) {
         }
     }
     if (!p) {
-        const newProduct = { id: uid('p'), code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, currentStock: Math.max(0, Number($id('p-stock').value) || 0), minimumStock: min, reservedStock: 0, currentCost: cost, averageCost: cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual', photoHash, photoUpdatedAt: photoFile ? now() : undefined };
+        const newProduct: Product = { id: uid('p'), code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, currentStock: Math.max(0, Number($id('p-stock').value) || 0), minimumStock: min, reservedStock: 0, currentCost: cost, averageCost: cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual', photoHash, photoUpdatedAt: photoFile ? now() : undefined };
         await db.put('products', newProduct);
         if (photoFile) {
             await db.put('productMedia', {
@@ -475,7 +475,7 @@ async function saveMovement() {
         allowNegativeStock: state.config.allowNegativeStock,
     });
     if (!validation.ok) {
-        toast(validation.message, 'error');
+        toast('message' in validation ? validation.message : 'Movimentação inválida.', 'error');
         return;
     }
     const next = validation.nextStock;
@@ -487,7 +487,7 @@ async function saveMovement() {
     }
     product.currentStock = next;
     product.updatedAt = now();
-    const m = { id: uid('mov'), productId: product.id, productCode: product.code, productName: product.name, type, quantity: amount, unitCost: cost, document: $id('m-doc').value.trim(), responsible: $id('m-resp').value.trim(), workOrder: $id('m-os').value.trim(), vehicle: $id('m-vehicle').value.trim(), note: $id('m-note').value.trim(), createdAt: now() };
+    const m: Movement = { id: uid('mov'), productId: product.id, productCode: product.code, productName: product.name, type, quantity: amount, unitCost: cost, document: $id('m-doc').value.trim(), responsible: $id('m-resp').value.trim(), workOrder: $id('m-os').value.trim(), vehicle: $id('m-vehicle').value.trim(), note: $id('m-note').value.trim(), createdAt: now() };
     state.movements.unshift(m);
     await db.put('movements', m);
     await db.put('products', product);
@@ -523,7 +523,7 @@ async function saveInventory() {
         product.currentStock = counted;
         product.updatedAt = now();
 
-        const movement = {
+        const movement: Movement = {
             id: uid('mov'),
             productId: product.id,
             productCode: product.code,
@@ -546,7 +546,7 @@ async function saveInventory() {
     toast(count ? `${count} ajustes registrados` : 'Nenhuma diferença para ajustar', count ? 'success' : 'warning');
     renderPage();
 }
-async function saveQuote() { const cart = (window._quoteCart?.() ?? []); const q = { id: uid('quote'), number: `ORC-${new Date().getFullYear()}-${String(state.quotes.length + 1).padStart(4, '0')}`, customer: $id('q-customer').value.trim(), title: $id('q-title').value.trim() || 'Orçamento', validUntil: $id('q-valid').value || undefined, status: 'draft', notes: $id('q-notes').value.trim(), items: cart, createdAt: now(), updatedAt: now() }; state.quotes.unshift(q); await db.put('quotes', q); log('create', `Orçamento criado: ${q.number}`, `${q.items.length} itens · ${money(quoteTotal(q))}`, 'quote', q.id); closeModal(); renderPage(); toast('Orçamento salvo'); }
+async function saveQuote() { const cart = (window._quoteCart?.() ?? []); const q: Quote = { id: uid('quote'), number: `ORC-${new Date().getFullYear()}-${String(state.quotes.length + 1).padStart(4, '0')}`, customer: $id('q-customer').value.trim(), title: $id('q-title').value.trim() || 'Orçamento', validUntil: $id('q-valid').value || undefined, status: 'draft', notes: $id('q-notes').value.trim(), items: cart, createdAt: now(), updatedAt: now() }; state.quotes.unshift(q); await db.put('quotes', q); log('create', `Orçamento criado: ${q.number}`, `${q.items.length} itens · ${money(quoteTotal(q))}`, 'quote', q.id); closeModal(); renderPage(); toast('Orçamento salvo'); }
 function openNfeDetail(nfeId) { const n = state.nfe.find(x => x.id === nfeId); if (!n)
     return; const items = state.nfeItems.filter(i => i.nfeId === n.id); const profile = n.readerProfile === 'danfe' ? 'DANFE' : n.readerProfile === 'pedido' ? 'Pedido' : n.readerProfile === 'orcamento' ? 'Orçamento' : n.readerProfile === 'generic' ? 'Documento genérico' : 'Não identificado'; const review = items.filter(i => i.status === 'review').length; const canProcess = n.status !== 'processed' && n.status !== 'cancelled' && items.length > 0; const footer = `<div class="modal-actions nfe-modal-actions"><button class="btn btn-secondary" data-action="close-modal">Fechar</button>${n.status === 'cancelled' ? `<button class="btn btn-secondary" data-action="reopen-nfe" data-id="${n.id}">${icon('refresh', 15)} Reabrir revisão</button>` : n.status !== 'processed' ? `<button class="btn btn-danger ghost" data-action="delete-nfe" data-id="${n.id}">${icon('trash', 15)} Excluir nota</button><button class="btn btn-secondary" data-action="cancel-nfe" data-id="${n.id}">${icon('close', 15)} Cancelar revisão</button>` : ''}${canProcess ? `<button class="btn btn-primary" data-action="process-nfe" data-id="${n.id}">${icon('check', 15)} Confirmar entrada</button>` : ''}</div>`; showModal('Revisar documento', `<div class="detail-grid"><div><span>Status</span><b>${esc(n.status)}</b></div><div><span>Leitura</span><b>${esc(profile)}${n.readerConfidence ? ` · ${Math.round(n.readerConfidence * 100)}%` : ''}</b></div><div><span>Fornecedor</span><b>${esc(n.supplierName || '—')}</b></div><div><span>Número</span><b>${esc(n.number || '—')}</b></div><div><span>Itens</span><b>${items.length}</b></div><div><span>Revisão</span><b>${review ? review + ' item(ns)' : 'Nenhum item pendente'}</b></div></div>${n.parseWarnings?.length ? `<div class="data-note"><span>${icon('alert', 17)}</span><p><b>Alertas</b><br/>${n.parseWarnings.map(w => esc(w)).join('<br/>')}</p></div>` : ''}<div class="data-note"><span>${icon('file', 17)}</span><p><b>${esc(n.sourceName)}</b><br/>${esc(n.note || 'Documento pronto para conferência.')}</p></div>${items.length ? `<div class="modal-subtitle">Itens reconhecidos</div><div class="table-wrap mini-table"><table><thead><tr><th>Item</th><th>Código</th><th>Qtd.</th><th>Unit.</th><th>Confiança</th><th>Correspondência</th><th>Ação</th></tr></thead><tbody>${items.map(i => { const conf = Math.round((i.confidence ?? 0) * 100), m = Math.round((i.matchConfidence ?? 0) * 100), p = i.matchedProductId ? getProduct(i.matchedProductId) : undefined; const cls = conf >= 80 ? 'status-ok' : conf >= 60 ? 'status-low' : 'status-critical'; return `<tr><td><b>${esc(i.description)}</b><small>${i.warnings?.[0] ? esc(i.warnings[0]) : esc(i.sourceLine || '')}</small></td><td>${esc(i.code || '—')}</td><td>${qty(i.quantity)} ${esc(i.unit)}</td><td>${money(i.unitCost)}</td><td><span class="status ${cls}"><i></i>${conf}%</span></td><td><span class="status ${p ? 'status-ok' : 'status-low'}"><i></i>${p ? esc(p.name) : 'Novo'}${m ? ` · ${m}%` : ''}</span></td><td><span class="status ${i.status === 'review' ? 'status-low' : i.status === 'skip' ? 'status-critical' : 'status-ok'}"><i></i>${i.status === 'review' ? 'Revisar' : i.status === 'skip' ? 'Ignorado' : i.status === 'new' ? 'Novo' : 'Pronto'}</span></td></tr>`; }).join('')}</tbody></table></div>` : ''}${footer}`); }
 async function setNfeItemStatus(id, status) { const item = state.nfeItems.find(i => i.id === id); if (!item)
@@ -1177,7 +1177,7 @@ async function importCsv(text, name) {
 
     const validation = validateImportedProducts(candidates);
     if (!validation.ok) {
-        toast(`CSV rejeitado: ${validation.errors.length} linha(s) inválida(s).`, 'error');
+        toast(`CSV rejeitado: ${'errors' in validation ? validation.errors.length : 0} linha(s) inválida(s).`, 'error');
         return;
     }
 
@@ -1209,7 +1209,7 @@ async function importCsv(text, name) {
                 n.status = 'error';
                 n.note = stockCheck.message;
                 await db.put('nfe', n);
-                toast(`Importação interrompida: ${stockCheck.message}`, 'error');
+                toast(`Importação interrompida: ${'message' in stockCheck ? stockCheck.message : 'Saldo inválido.'}`, 'error');
                 return;
             }
         }
@@ -1261,7 +1261,7 @@ async function importSnapshot(parsed, name) {
 
     const validation = validateImportedProducts(rawProducts);
     if (!validation.ok) {
-        toast(`Backup rejeitado: ${validation.errors.length} registro(s) inválido(s).`, 'error');
+        toast(`Backup rejeitado: ${'errors' in validation ? validation.errors.length : 0} registro(s) inválido(s).`, 'error');
         return;
     }
 
