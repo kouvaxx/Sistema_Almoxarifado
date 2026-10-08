@@ -992,7 +992,7 @@ async function readPdfSmartStandalone(file) {
 async function parsePdfMetadata(file) { return readPdfSmartStandalone(file); }
 async function imageDHash(blob) { const w = 9, h = 8; const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; const ctx = canvas.getContext('2d', { willReadFrequently: true }); if (!ctx)
     throw new Error('Canvas não disponível'); const url = URL.createObjectURL(blob); try {
-    const img = await new Promise((resolve, reject) => { const el = new Image(); el.onload = () => resolve(el); el.onerror = () => reject(new Error('Imagem inválida.')); el.src = url; });
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => { const el = new Image(); el.onload = () => resolve(el); el.onerror = () => reject(new Error('Imagem inválida.')); el.src = url; });
     ctx.drawImage(img, 0, 0, w, h);
     const data = ctx.getImageData(0, 0, w, h).data;
     let bits = '';
