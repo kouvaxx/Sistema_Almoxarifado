@@ -416,11 +416,11 @@ async function saveProduct(id) {
     }
     pendingPhotoFile = undefined;
     closeDrawer();
-    render();
+    renderPage();
 }
 async function deleteProduct(id) { const p = getProduct(id); if (!p)
     return; if (!confirm(`Desativar “${p.name}”? O histórico será preservado.`))
-    return; p.active = false; p.updatedAt = now(); await db.put('products', p); rebuildIndexes(); log('delete', `Produto desativado: ${p.name}`, 'Histórico preservado', 'product', p.id); closeDrawer(); render(); toast('Produto desativado', 'warning'); }
+    return; p.active = false; p.updatedAt = now(); await db.put('products', p); rebuildIndexes(); log('delete', `Produto desativado: ${p.name}`, 'Histórico preservado', 'product', p.id); closeDrawer(); renderPage(); toast('Produto desativado', 'warning'); }
 async function saveSupplier(id) { const name = document.getElementById('s-name').value.trim().toUpperCase(); if (!name) {
     toast('Nome do fornecedor é obrigatório', 'error');
     return;
@@ -435,10 +435,10 @@ else {
     Object.assign(s, { name, cnpj: document.getElementById('s-cnpj').value.trim(), contact: document.getElementById('s-contact').value.trim(), phone: document.getElementById('s-phone').value.trim(), whatsapp: document.getElementById('s-whatsapp').value.trim(), email: document.getElementById('s-email').value.trim(), averageLeadDays: Math.max(0, Number(document.getElementById('s-lead').value) || 0), paymentTerms: document.getElementById('s-payment').value.trim(), updatedAt: now() });
     await db.put('suppliers', s);
     log('update', `Fornecedor alterado: ${name}`, 'Cadastro atualizado', 'supplier', s.id);
-} closeDrawer(); render(); toast('Fornecedor salvo'); }
+} closeDrawer(); renderPage(); toast('Fornecedor salvo'); }
 async function deleteSupplier(id) { const s = getSupplier(id); if (!s)
     return; if (!confirm(`Desativar ${s.name}?`))
-    return; s.active = false; s.updatedAt = now(); await db.put('suppliers', s); log('delete', `Fornecedor desativado: ${s.name}`, 'Produtos vinculados permanecem cadastrados.', 'supplier', id); closeDrawer(); render(); toast('Fornecedor desativado', 'warning'); }
+    return; s.active = false; s.updatedAt = now(); await db.put('suppliers', s); log('delete', `Fornecedor desativado: ${s.name}`, 'Produtos vinculados permanecem cadastrados.', 'supplier', id); closeDrawer(); renderPage(); toast('Fornecedor desativado', 'warning'); }
 async function saveMovement() {
     const product = getProduct(document.getElementById('m-product').value);
     if (!product) {
@@ -484,7 +484,7 @@ async function saveMovement() {
     await db.put('products', product);
     log('movement', `${typeLabel(type)} · ${product.name}`, `${type === 'ajuste' ? 'Saldo final: ' + qty(next) : 'Quantidade: ' + qty(amount)} · Documento: ${m.document || '—'}`, 'movement', m.id);
     closeModal();
-    render();
+    renderPage();
     toast('Movimentação registrada');
 }
 function typeLabel(t) { return t === 'entrada' ? 'Entrada' : t === 'saida' ? 'Saída' : t === 'ajuste' ? 'Ajuste' : t === 'devolucao' ? 'Devolução' : 'Transferência'; }
@@ -508,8 +508,8 @@ async function saveInventory() { const inputs = [...document.querySelectorAll('.
     await db.put('products', p);
     log('inventory', `Inventário ajustado: ${p.name}`, `${qty(before)} → ${qty(counted)}`, 'product', p.id);
     changes++;
-} toast(changes ? `${changes} ajustes registrados` : 'Nenhuma diferença para ajustar', changes ? 'success' : 'warning'); render(); }
-async function saveQuote() { const cart = (window._quoteCart?.() ?? []); const q = { id: uid('quote'), number: `ORC-${new Date().getFullYear()}-${String(state.quotes.length + 1).padStart(4, '0')}`, customer: document.getElementById('q-customer').value.trim(), title: document.getElementById('q-title').value.trim() || 'Orçamento', validUntil: document.getElementById('q-valid').value || undefined, status: 'draft', notes: document.getElementById('q-notes').value.trim(), items: cart, createdAt: now(), updatedAt: now() }; state.quotes.unshift(q); await db.put('quotes', q); log('create', `Orçamento criado: ${q.number}`, `${q.items.length} itens · ${money(quoteTotal(q))}`, 'quote', q.id); closeModal(); render(); toast('Orçamento salvo'); }
+} toast(changes ? `${changes} ajustes registrados` : 'Nenhuma diferença para ajustar', changes ? 'success' : 'warning'); renderPage(); }
+async function saveQuote() { const cart = (window._quoteCart?.() ?? []); const q = { id: uid('quote'), number: `ORC-${new Date().getFullYear()}-${String(state.quotes.length + 1).padStart(4, '0')}`, customer: document.getElementById('q-customer').value.trim(), title: document.getElementById('q-title').value.trim() || 'Orçamento', validUntil: document.getElementById('q-valid').value || undefined, status: 'draft', notes: document.getElementById('q-notes').value.trim(), items: cart, createdAt: now(), updatedAt: now() }; state.quotes.unshift(q); await db.put('quotes', q); log('create', `Orçamento criado: ${q.number}`, `${q.items.length} itens · ${money(quoteTotal(q))}`, 'quote', q.id); closeModal(); renderPage(); toast('Orçamento salvo'); }
 function openNfeDetail(nfeId) { const n = state.nfe.find(x => x.id === nfeId); if (!n)
     return; const items = state.nfeItems.filter(i => i.nfeId === n.id); const profile = n.readerProfile === 'danfe' ? 'DANFE' : n.readerProfile === 'pedido' ? 'Pedido' : n.readerProfile === 'orcamento' ? 'Orçamento' : n.readerProfile === 'generic' ? 'Documento genérico' : 'Não identificado'; const review = items.filter(i => i.status === 'review').length; const canProcess = n.status !== 'processed' && n.status !== 'cancelled' && items.length > 0; const footer = `<div class="modal-actions nfe-modal-actions"><button class="btn btn-secondary" data-action="close-modal">Fechar</button>${n.status === 'cancelled' ? `<button class="btn btn-secondary" data-action="reopen-nfe" data-id="${n.id}">${icon('refresh', 15)} Reabrir revisão</button>` : n.status !== 'processed' ? `<button class="btn btn-danger ghost" data-action="delete-nfe" data-id="${n.id}">${icon('trash', 15)} Excluir nota</button><button class="btn btn-secondary" data-action="cancel-nfe" data-id="${n.id}">${icon('close', 15)} Cancelar revisão</button>` : ''}${canProcess ? `<button class="btn btn-primary" data-action="process-nfe" data-id="${n.id}">${icon('check', 15)} Confirmar entrada</button>` : ''}</div>`; showModal('Revisar documento', `<div class="detail-grid"><div><span>Status</span><b>${esc(n.status)}</b></div><div><span>Leitura</span><b>${esc(profile)}${n.readerConfidence ? ` · ${Math.round(n.readerConfidence * 100)}%` : ''}</b></div><div><span>Fornecedor</span><b>${esc(n.supplierName || '—')}</b></div><div><span>Número</span><b>${esc(n.number || '—')}</b></div><div><span>Itens</span><b>${items.length}</b></div><div><span>Revisão</span><b>${review ? review + ' item(ns)' : 'Nenhum item pendente'}</b></div></div>${n.parseWarnings?.length ? `<div class="data-note"><span>${icon('alert', 17)}</span><p><b>Alertas</b><br/>${n.parseWarnings.map(w => esc(w)).join('<br/>')}</p></div>` : ''}<div class="data-note"><span>${icon('file', 17)}</span><p><b>${esc(n.sourceName)}</b><br/>${esc(n.note || 'Documento pronto para conferência.')}</p></div>${items.length ? `<div class="modal-subtitle">Itens reconhecidos</div><div class="table-wrap mini-table"><table><thead><tr><th>Item</th><th>Código</th><th>Qtd.</th><th>Unit.</th><th>Confiança</th><th>Correspondência</th><th>Ação</th></tr></thead><tbody>${items.map(i => { const conf = Math.round((i.confidence ?? 0) * 100), m = Math.round((i.matchConfidence ?? 0) * 100), p = i.matchedProductId ? getProduct(i.matchedProductId) : undefined; const cls = conf >= 80 ? 'status-ok' : conf >= 60 ? 'status-low' : 'status-critical'; return `<tr><td><b>${esc(i.description)}</b><small>${i.warnings?.[0] ? esc(i.warnings[0]) : esc(i.sourceLine || '')}</small></td><td>${esc(i.code || '—')}</td><td>${qty(i.quantity)} ${esc(i.unit)}</td><td>${money(i.unitCost)}</td><td><span class="status ${cls}"><i></i>${conf}%</span></td><td><span class="status ${p ? 'status-ok' : 'status-low'}"><i></i>${p ? esc(p.name) : 'Novo'}${m ? ` · ${m}%` : ''}</span></td><td><span class="status ${i.status === 'review' ? 'status-low' : i.status === 'skip' ? 'status-critical' : 'status-ok'}"><i></i>${i.status === 'review' ? 'Revisar' : i.status === 'skip' ? 'Ignorado' : i.status === 'new' ? 'Novo' : 'Pronto'}</span></td></tr>`; }).join('')}</tbody></table></div>` : ''}${footer}`); }
 async function setNfeItemStatus(id, status) { const item = state.nfeItems.find(i => i.id === id); if (!item)
@@ -520,9 +520,9 @@ async function deleteNfe(id) { const n = state.nfe.find(x => x.id === id); if (!
     return;
 } if (!confirm(`Excluir o documento "${n.sourceName}" e todos os itens reconhecidos?`))
     return; const items = state.nfeItems.filter(i => i.nfeId === id); for (const item of items)
-    await db.delete('nfeItems', item.id); state.nfeItems = state.nfeItems.filter(i => i.nfeId !== id); state.nfe = state.nfe.filter(x => x.id !== id); await db.delete('nfe', id); log('delete', `Documento excluído: ${n.sourceName}`, `${items.length} itens removidos`, 'nfe', id); closeModal(); render(); toast('Documento excluído', 'warning'); }
+    await db.delete('nfeItems', item.id); state.nfeItems = state.nfeItems.filter(i => i.nfeId !== id); state.nfe = state.nfe.filter(x => x.id !== id); await db.delete('nfe', id); log('delete', `Documento excluído: ${n.sourceName}`, `${items.length} itens removidos`, 'nfe', id); closeModal(); renderPage(); toast('Documento excluído', 'warning'); }
 async function cancelNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n || n.status === 'processed')
-    return; n.status = 'cancelled'; n.note = `Revisão cancelada em ${dateTime(now())}.`; await db.put('nfe', n); log('update', `Revisão cancelada: ${n.sourceName}`, 'Documento mantido para histórico', 'nfe', id); closeModal(); render(); toast('Revisão cancelada', 'warning'); }
+    return; n.status = 'cancelled'; n.note = `Revisão cancelada em ${dateTime(now())}.`; await db.put('nfe', n); log('update', `Revisão cancelada: ${n.sourceName}`, 'Documento mantido para histórico', 'nfe', id); closeModal(); renderPage(); toast('Revisão cancelada', 'warning'); }
 async function reopenNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n || n.status !== 'cancelled')
     return; n.status = 'review'; n.note = `Revisão reaberta em ${dateTime(now())}.`; await db.put('nfe', n); log('update', `Revisão reaberta: ${n.sourceName}`, 'Documento voltou para conferência', 'nfe', id); closeModal(); openNfeDetail(id); }
 async function processNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n)
@@ -575,7 +575,7 @@ async function processNfe(id) { const n = state.nfe.find(x => x.id === id); if (
         await db.put('nfeItems', item);
         updated++;
     }
-} rebuildIndexes(); n.status = 'processed'; n.note = `Processado: ${updated} movimentos · ${created} novos produtos.`; await db.put('nfe', n); log('import', `Documento processado: ${n.sourceName}`, `${updated} movimentos · ${created} novos produtos`, 'nfe', id); closeModal(); render(); toast(`Entrada confirmada: ${updated} movimentos · ${created} novos`, 'success'); }
+} rebuildIndexes(); n.status = 'processed'; n.note = `Processado: ${updated} movimentos · ${created} novos produtos.`; await db.put('nfe', n); log('import', `Documento processado: ${n.sourceName}`, `${updated} movimentos · ${created} novos produtos`, 'nfe', id); closeModal(); renderPage(); toast(`Entrada confirmada: ${updated} movimentos · ${created} novos`, 'success'); }
 function scanCode() { showModal('Consultar código', `<div class="scan-box"><div class="scan-visual">${icon('barcode', 56)}</div><p>Digite ou cole o código interno/EAN. Em navegadores que suportam BarcodeDetector, o leitor por câmera pode ser adicionado ao adaptador PWA.</p><label>Código<input id="scan-code" autofocus placeholder="Ex.: 7891645083014" /></label><div class="modal-actions"><button class="btn btn-secondary" data-action="close-modal">Cancelar</button><button class="btn btn-primary" data-action="lookup-code">${icon('search', 15)} Consultar</button></div></div>`); setTimeout(() => document.getElementById('scan-code')?.focus(), 50); }
 function lookupCode() { const code = document.getElementById('scan-code')?.value.trim(); if (!code)
     return toast('Informe um código', 'warning'); const p = state.products.find(x => x.code === code); if (!p) {
@@ -1046,7 +1046,7 @@ else if (!m.product && ex < .62)
 async function importTextOrder(text, name) { const result = analyzeTextDocument(text); if (!result.items.length) {
     toast('Nenhum item identificável no pedido. Revise o texto ou use CSV.', 'error');
     return;
-} const n = { id: uid('nfe'), sourceName: name, sourceType: 'manual', status: 'review', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile, readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: `Leitura inteligente de texto · ${result.profile}` }; const items = applyImportedItems(result.items, n.id); state.nfe.unshift(n); state.nfeItems.push(...items); await db.put('nfe', n); await db.bulkPut('nfeItems', items); log('import', `Pedido importado: ${name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id); toast(`${items.length} itens reconhecidos`, 'success'); render(); }
+} const n = { id: uid('nfe'), sourceName: name, sourceType: 'manual', status: 'review', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile, readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: `Leitura inteligente de texto · ${result.profile}` }; const items = applyImportedItems(result.items, n.id); state.nfe.unshift(n); state.nfeItems.push(...items); await db.put('nfe', n); await db.bulkPut('nfeItems', items); log('import', `Pedido importado: ${name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id); toast(`${items.length} itens reconhecidos`, 'success'); renderPage(); }
 async function importFile(file) { const ext = file.name.split('.').pop()?.toLowerCase(); if (ext === 'json') {
     try {
         await importSnapshot(JSON.parse(await file.text()), file.name);
@@ -1073,7 +1073,7 @@ else if (ext === 'pdf' || file.type === 'application/pdf') {
             await db.bulkPut('nfeItems', items);
         log('import', `PDF importado: ${file.name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id);
         toast(items.length ? `${items.length} itens reconhecidos. Revise a leitura.` : 'PDF lido, mas nenhum item foi reconhecido.', 'warning');
-        render();
+        renderPage();
     }
     catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -1082,7 +1082,7 @@ else if (ext === 'pdf' || file.type === 'application/pdf') {
         await db.put('nfe', n);
         log('import', `Erro ao ler PDF: ${file.name}`, message, 'nfe', n.id);
         toast(message, 'error');
-        render();
+        renderPage();
     }
 }
 else
@@ -1127,7 +1127,7 @@ async function importCsv(text, name) {
     await db.put('nfe', n);
     log('import', `CSV processado: ${name}`, `${applied} produtos atualizados`, 'nfe', n.id);
     toast(`Importação concluída: ${applied} produtos`);
-    render();
+    renderPage();
 }
 async function importSnapshot(parsed, name) {
     let products = Array.isArray(parsed) ? parsed : Array.isArray(parsed.products) ? parsed.products : Array.isArray(parsed.produtos) ? parsed.produtos : [];
@@ -1178,7 +1178,7 @@ async function importSnapshot(parsed, name) {
     rebuildIndexes();
     log('import', `Backup importado: ${name}`, `${created} novos · ${updated} atualizados`);
     toast(`Importação concluída: ${created} novos · ${updated} atualizados`);
-    render();
+    renderPage();
 }
 function exportSnapshot() { const safeProducts = state.products.map(p => { const { photoBlob, ...safe } = p; return safe; }); const snapshot = { products: safeProducts, suppliers: state.suppliers, categories: state.categories, movements: state.movements, nfe: state.nfe.map(n => { const { fileBlob, ...safe } = n; return safe; }), nfeItems: state.nfeItems, quotes: state.quotes, audit: state.audit, config: state.config }; downloadText(`almoxarifado-v9-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(snapshot, null, 2), 'application/json'); log('export', 'Backup JSON exportado', 'Snapshot completo'); toast('Backup JSON exportado'); }
 function exportCsv() { const rows = [['Código', 'Produto', 'Fornecedor', 'Categoria', 'Unidade', 'Estoque', 'Mínimo', 'Custo atual', 'Valor estoque', 'Status']]; for (const p of state.products) {
