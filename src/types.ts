@@ -44,6 +44,8 @@ export interface Product {
   createdAt: string;
   updatedAt: string;
   legacySource?: 'v8-seed' | 'v8-import' | 'manual';
+  photoHash?: string;
+  photoUpdatedAt?: string;
 }
 
 export interface Movement {
@@ -73,6 +75,10 @@ export interface NfeItem {
   matchedProductId?: string;
   confidence?: number;
   status: 'new' | 'update' | 'skip' | 'review';
+  matchConfidence?: number;
+  matchMethod?: string;
+  sourceLine?: string;
+  warnings?: string[];
 }
 
 export interface NfeDocument {
@@ -88,6 +94,9 @@ export interface NfeDocument {
   status: 'new' | 'review' | 'processed' | 'error';
   createdAt: string;
   note?: string;
+  readerProfile?: 'danfe' | 'pedido' | 'orcamento' | 'generic';
+  readerConfidence?: number;
+  parseWarnings?: string[];
 }
 
 export interface NfeFile {
@@ -147,6 +156,7 @@ export interface AppConfig {
   lastBackupAt?: string;
   initializedAt: string;
   schemaVersion: number;
+  liteMode?: boolean;
 }
 
 export interface DatabaseSnapshot {
