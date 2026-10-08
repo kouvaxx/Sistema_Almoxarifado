@@ -1,5 +1,3 @@
-import type { NfeDocument } from '../types';
-
 export type NfeProfile = 'danfe' | 'pedido' | 'orcamento' | 'generic';
 
 export interface ParsedNfeItem {
