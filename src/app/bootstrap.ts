@@ -2,11 +2,11 @@ const uid = (prefix = 'id') => `${prefix}-${crypto.randomUUID?.() ?? `${Date.now
 const now = () => new Date().toISOString();
 const norm = (value: unknown): string => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
-import { db, defaultConfig, loadSnapshot } from '../db';
+import { repository } from './repository';
 import { CATEGORY_META, SEED_CATEGORIES, SEED_PRODUCTS, SEED_SUPPLIERS } from '../seed';
 
 export async function seedDatabase() {
-    const snapshot = await loadSnapshot();
+    const snapshot = await repository.loadSnapshot();
     if (snapshot.products.length)
         return snapshot;
     const categories = SEED_CATEGORIES;
@@ -17,16 +17,16 @@ export async function seedDatabase() {
     const nfe = [];
     const nfeItems = [];
     const audit = [];
-    const config = defaultConfig();
-    await db.bulkPut('categories', categories);
-    await db.bulkPut('suppliers', suppliers);
-    await db.bulkPut('products', products);
-    await db.bulkPut('movements', movements);
-    await db.bulkPut('quotes', quotes);
-    await db.bulkPut('audit', audit);
-    await db.bulkPut('nfe', nfe);
-    await db.bulkPut('nfeItems', []);
-    await db.put('config', config);
+    const config = repository.createDefaultConfig();
+    await repository.saveCategories(categories);
+    await repository.saveSuppliers(suppliers);
+    await repository.saveProducts(products);
+    await repository.saveMovements(movements);
+    await repository.saveQuotes(quotes);
+    for (const entry of audit) await repository.saveAudit(entry);
+    await repository.saveNfes(nfe);
+    
+    await repository.saveConfig(config);
     return { products, suppliers, categories, movements, nfe, nfeItems, quotes, audit, config };
 }
 export async function tryLegacyMigration(logMigration?: (type: 'import', message: string, detail?: string) => void) {
@@ -34,7 +34,7 @@ export async function tryLegacyMigration(logMigration?: (type: 'import', message
         const legacy = localStorage.getItem('produtos_lista_v8');
         if (!legacy)
             return false;
-        const existing = await db.getAll('products');
+        const existing = await repository.getProducts();
         if (existing.length)
             return false;
         const arr = JSON.parse(legacy);
@@ -60,11 +60,11 @@ export async function tryLegacyMigration(logMigration?: (type: 'import', message
             const cost = Math.max(0, Number(p.preco) || 0);
             products.push({ id: uid('p'), code: String(p.id ?? '—'), name: String(p.nome || '').trim().toUpperCase(), supplierId, supplierNameLegacy: supplierName, categoryId: catId, unit: p.unidade || 'un', currentStock: stock, minimumStock: 2, reservedStock: 0, currentCost: cost, averageCost: cost, active: true, createdAt: t, updatedAt: t, legacySource: 'v8-import' });
         }
-        await db.bulkPut('suppliers', [...suppliersByName.values()]);
-        await db.bulkPut('categories', [...categoriesByName.values()]);
-        await db.bulkPut('products', products);
-        const config = defaultConfig();
-        await db.put('config', config);
+        await repository.saveSuppliers([...suppliersByName.values()]);
+        await repository.saveCategories([...categoriesByName.values()]);
+        await repository.saveProducts(products);
+        const config = repository.createDefaultConfig();
+        await repository.saveConfig(config);
         logMigration?.('import', `Migração da v8 concluída: ${products.length} produtos`, 'Origem: localStorage produtos_lista_v8');
         return true;
     }
