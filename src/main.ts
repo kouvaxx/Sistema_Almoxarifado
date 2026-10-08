@@ -451,7 +451,7 @@ async function saveMovement() {
         toast('Produto inválido', 'error');
         return;
     }
-    const type = document.getElementById('m-type').value;
+    const type = document.getElementById('m-type').value as MovementType;
     const amount = Math.max(0, Number(document.getElementById('m-qty').value) || 0);
     if (!(amount > 0)) {
         toast('Informe uma quantidade válida', 'error');
