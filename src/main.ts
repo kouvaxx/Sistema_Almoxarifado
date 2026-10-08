@@ -6,6 +6,7 @@ import { applyImportedItems } from './domain/nfe-matching';
 import { imageDHash, normalizedPhotoCode, searchPhoto } from './app/photo-search';
 import { seedDatabase, tryLegacyMigration } from './app/bootstrap';
 import { nfePdfReader } from './app/nfe-pdf-reader';
+import { dispatchImport } from './app/import-service';
 import { CATEGORY_META } from './seed';
 import {
   calculateWeightedAverageCost,
@@ -574,21 +575,29 @@ async function importTextOrder(text, name) { const result = analyzeTextDocument(
     toast('Nenhum item identificável no pedido. Revise o texto ou use CSV.', 'error');
     return;
 } const n: NfeDocument = { id: uid('nfe'), sourceName: name, sourceType: 'manual', status: 'review', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile as NfeDocument['readerProfile'], readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: `Leitura inteligente de texto · ${result.profile}` }; const items = applyImportedItems(result.items, n.id, state.products); state.nfe.unshift(n); state.nfeItems.push(...items); await db.put('nfe', n); await db.bulkPut('nfeItems', items); log('import', `Pedido importado: ${name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id); toast(`${items.length} itens reconhecidos`, 'success'); renderPage(); }
-async function importFile(file) { const ext = file.name.split('.').pop()?.toLowerCase(); if (ext === 'json') {
-    try {
-        await importSnapshot(JSON.parse(await file.text()), file.name);
-    }
-    catch {
-        toast('JSON inválido', 'error');
-    }
+async function importFile(file: File) {
+    await dispatchImport(file, {
+        json: async input => {
+            try {
+                await importSnapshot(JSON.parse(await input.text()), input.name);
+            }
+            catch {
+                toast('JSON inválido', 'error');
+            }
+        },
+        csv: async input => {
+            await importCsv(await input.text(), input.name);
+        },
+        txt: async input => {
+            await importTextOrder(await input.text(), input.name);
+        },
+        pdf: async input => {
+            await importPdfFile(input);
+        },
+        unsupported: () => toast('Formato não suportado', 'error'),
+    });
 }
-else if (ext === 'csv' || file.type === 'text/csv') {
-    await importCsv(await file.text(), file.name);
-}
-else if (ext === 'txt' || file.type === 'text/plain') {
-    await importTextOrder(await file.text(), file.name);
-}
-else if (ext === 'pdf' || file.type === 'application/pdf') {
+async function importPdfFile(file: File) {
     try {
         const result = await parsePdfMetadata(file);
         const n: NfeDocument = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: result.items.length ? 'review' : 'error', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile as NfeDocument['readerProfile'], readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: result.items.length ? `Leitura inteligente: ${result.profile} · ${result.items.length} itens.` : 'Nenhum item reconhecido automaticamente.' };
@@ -628,8 +637,6 @@ else if (ext === 'pdf' || file.type === 'application/pdf') {
         renderPage();
     }
 }
-else
-    toast('Formato não suportado', 'error'); }
 async function importCsv(text, name) {
     const lines = text.split(/\r?\n/).filter(Boolean);
     if (lines.length < 2) {
