@@ -11,7 +11,6 @@ import { registerStockMovement } from './app/stock-service';
 import { processNfeDocument } from './app/nfe-processing-service';
 import { CATEGORY_META } from './seed';
 import {
-  calculateWeightedAverageCost,
   getStockStatus,
   movementTypeLabel,
   stockStatusClass,
