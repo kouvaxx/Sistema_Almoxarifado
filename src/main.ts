@@ -144,7 +144,6 @@ async function seedDatabase() {
     const nfeItems = [];
     const audit = [];
     const config = defaultConfig();
-    config.schemaVersion = 1;
     await db.bulkPut('categories', categories);
     await db.bulkPut('suppliers', suppliers);
     await db.bulkPut('products', products);
