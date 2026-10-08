@@ -88,7 +88,24 @@ export interface NfeDocument {
   status: 'new' | 'review' | 'processed' | 'error';
   createdAt: string;
   note?: string;
-  fileBlob?: Blob;
+}
+
+export interface NfeFile {
+  id: string;
+  nfeId: string;
+  blob: Blob;
+  mimeType: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface ProductMedia {
+  id: string;
+  productId: string;
+  blob: Blob;
+  mimeType: string;
+  name: string;
+  updatedAt: string;
 }
 
 export interface QuoteItem {

@@ -1,8 +1,20 @@
 import type { AppConfig, AuditEntry, Category, DatabaseSnapshot, Movement, NfeDocument, NfeItem, Product, Quote, Supplier } from './types';
 
 const DB_NAME = 'almoxarifado_v9';
-export const DB_VERSION = 2;
-const STORES = ['products', 'suppliers', 'categories', 'movements', 'nfe', 'nfeItems', 'quotes', 'audit', 'config'] as const;
+export const DB_VERSION = 3;
+const STORES = [
+  'products',
+  'suppliers',
+  'categories',
+  'movements',
+  'nfe',
+  'nfeItems',
+  'quotes',
+  'audit',
+  'config',
+  'productMedia',
+  'nfeFiles',
+] as const;
 
 type StoreName = typeof STORES[number];
 
@@ -55,9 +67,60 @@ function migrateV1ToV2(db: IDBDatabase, transaction: IDBTransaction): void {
   ensureIndex(quotes, 'byStatus', 'status');
   ensureIndex(quotes, 'byCreatedAt', 'createdAt');
 
-  // Keep the transaction reference explicit: this function intentionally performs
-  // only schema work, while data normalization happens after the DB opens.
   void db;
+}
+
+function migrateV2ToV3(transaction: IDBTransaction): void {
+  const productStore = transaction.objectStore('products');
+  const productMediaStore = transaction.objectStore('productMedia');
+  ensureIndex(productMediaStore, 'byProductId', 'productId');
+
+  const productRequest = productStore.getAll();
+  productRequest.onsuccess = () => {
+    for (const product of productRequest.result as Array<Record<string, unknown> & { id: string }>) {
+      const blob = product.photoBlob;
+      if (blob instanceof Blob) {
+        productMediaStore.put({
+          id: product.id,
+          productId: product.id,
+          blob,
+          mimeType: blob.type || 'image/*',
+          name: String(product.photoName ?? `produto-${product.id}`),
+          updatedAt: String(product.photoUpdatedAt ?? new Date().toISOString()),
+        });
+
+        const cleaned = { ...product };
+        delete cleaned.photoBlob;
+        delete cleaned.photoName;
+        productStore.put(cleaned);
+      }
+    }
+  };
+
+  const nfeStore = transaction.objectStore('nfe');
+  const nfeFilesStore = transaction.objectStore('nfeFiles');
+  ensureIndex(nfeFilesStore, 'byNfeId', 'nfeId');
+
+  const nfeRequest = nfeStore.getAll();
+  nfeRequest.onsuccess = () => {
+    for (const nfe of nfeRequest.result as Array<Record<string, unknown> & { id: string }>) {
+      const blob = nfe.fileBlob;
+      if (blob instanceof Blob) {
+        nfeFilesStore.put({
+          id: nfe.id,
+          nfeId: nfe.id,
+          blob,
+          mimeType: blob.type || 'application/pdf',
+          name: String(nfe.sourceName ?? `nfe-${nfe.id}.pdf`),
+          createdAt: String(nfe.createdAt ?? new Date().toISOString()),
+        });
+
+        const cleaned = { ...nfe };
+        delete cleaned.fileBlob;
+        nfeStore.put(cleaned);
+      }
+    }
+  };
 }
 
 class LocalDB {
@@ -84,6 +147,9 @@ class LocalDB {
 
         if (oldVersion < 2) {
           migrateV1ToV2(db, transaction);
+        }
+        if (oldVersion < 3) {
+          migrateV2ToV3(transaction);
         }
       };
 

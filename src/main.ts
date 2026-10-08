@@ -144,7 +144,6 @@ async function seedDatabase() {
     const nfeItems = [];
     const audit = [];
     const config = defaultConfig();
-    config.schemaVersion = 1;
     await db.bulkPut('categories', categories);
     await db.bulkPut('suppliers', suppliers);
     await db.bulkPut('products', products);
@@ -395,27 +394,45 @@ async function saveProduct(id) {
     const p = id ? getProduct(id) : undefined;
     const photoFile = document.getElementById('p-photo')?.files?.[0] || pendingPhotoFile;
     let photoHash = p?.photoHash;
-    let photoBlob = p?.photoBlob;
     if (photoFile) {
         try {
             photoHash = await imageDHash(photoFile);
-            photoBlob = photoFile;
         }
         catch {
             toast('Não foi possível processar a foto.', 'warning');
         }
     }
     if (!p) {
-        const newProduct = { id: uid('p'), code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, currentStock: Math.max(0, Number(document.getElementById('p-stock').value) || 0), minimumStock: min, reservedStock: 0, currentCost: cost, averageCost: cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual', photoHash, photoBlob, photoUpdatedAt: photoFile ? now() : undefined };
+        const newProduct = { id: uid('p'), code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, currentStock: Math.max(0, Number(document.getElementById('p-stock').value) || 0), minimumStock: min, reservedStock: 0, currentCost: cost, averageCost: cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, active: true, createdAt: now(), updatedAt: now(), legacySource: 'manual', photoHash, photoUpdatedAt: photoFile ? now() : undefined };
         await db.put('products', newProduct);
+        if (photoFile) {
+            await db.put('productMedia', {
+                id: newProduct.id,
+                productId: newProduct.id,
+                blob: photoFile,
+                mimeType: photoFile.type || 'image/*',
+                name: photoFile.name,
+                updatedAt: newProduct.photoUpdatedAt || now(),
+            });
+        }
         state.products.unshift(newProduct);
         rebuildIndexes();
         log('create', `Produto criado: ${name}`, `Código ${code}`, 'product', newProduct.id);
         toast('Produto criado');
     }
     else {
-        Object.assign(p, { code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, minimumStock: min, currentCost: cost, averageCost: p.averageCost || cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, photoHash, photoBlob, photoUpdatedAt: photoFile ? now() : p.photoUpdatedAt, updatedAt: now() });
+        Object.assign(p, { code, name, supplierId, supplierNameLegacy: getSupplier(supplierId)?.name, categoryId, unit, minimumStock: min, currentCost: cost, averageCost: p.averageCost || cost, maximumStock: Number.isFinite(maxValue) && maxValue > 0 ? maxValue : undefined, photoHash, photoUpdatedAt: photoFile ? now() : p.photoUpdatedAt, updatedAt: now() });
         await db.put('products', p);
+        if (photoFile) {
+            await db.put('productMedia', {
+                id: p.id,
+                productId: p.id,
+                blob: photoFile,
+                mimeType: photoFile.type || 'image/*',
+                name: photoFile.name,
+                updatedAt: p.photoUpdatedAt || now(),
+            });
+        }
         log('update', `Produto alterado: ${name}`, 'Cadastro atualizado', 'product', p.id);
         toast('Alterações salvas');
     }
@@ -546,7 +563,7 @@ async function deleteNfe(id) { const n = state.nfe.find(x => x.id === id); if (!
     return;
 } if (!confirm(`Excluir o documento "${n.sourceName}" e todos os itens reconhecidos?`))
     return; const items = state.nfeItems.filter(i => i.nfeId === id); for (const item of items)
-    await db.delete('nfeItems', item.id); state.nfeItems = state.nfeItems.filter(i => i.nfeId !== id); state.nfe = state.nfe.filter(x => x.id !== id); await db.delete('nfe', id); log('delete', `Documento excluído: ${n.sourceName}`, `${items.length} itens removidos`, 'nfe', id); closeModal(); renderPage(); toast('Documento excluído', 'warning'); }
+    await db.delete('nfeItems', item.id); state.nfeItems = state.nfeItems.filter(i => i.nfeId !== id); state.nfe = state.nfe.filter(x => x.id !== id); await db.delete('nfeFiles', id); await db.delete('nfe', id); log('delete', `Documento excluído: ${n.sourceName}`, `${items.length} itens removidos`, 'nfe', id); closeModal(); renderPage(); toast('Documento excluído', 'warning'); }
 async function cancelNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n || n.status === 'processed')
     return; n.status = 'cancelled'; n.note = `Revisão cancelada em ${dateTime(now())}.`; await db.put('nfe', n); log('update', `Revisão cancelada: ${n.sourceName}`, 'Documento mantido para histórico', 'nfe', id); closeModal(); renderPage(); toast('Revisão cancelada', 'warning'); }
 async function reopenNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n || n.status !== 'cancelled')
@@ -1090,11 +1107,19 @@ else if (ext === 'txt' || file.type === 'text/plain') {
 else if (ext === 'pdf' || file.type === 'application/pdf') {
     try {
         const result = await parsePdfMetadata(file);
-        const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: result.items.length ? 'review' : 'error', createdAt: now(), fileBlob: file, number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile, readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: result.items.length ? `Leitura inteligente: ${result.profile} · ${result.items.length} itens.` : 'Nenhum item reconhecido automaticamente.' };
+        const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: result.items.length ? 'review' : 'error', createdAt: now(), number: result.metadata.number, key: result.metadata.key, cnpj: result.metadata.cnpj, issueDate: result.metadata.issueDate, total: result.metadata.total, supplierName: result.metadata.supplierName, readerProfile: result.profile, readerConfidence: result.profileConfidence, parseWarnings: result.warnings, note: result.items.length ? `Leitura inteligente: ${result.profile} · ${result.items.length} itens.` : 'Nenhum item reconhecido automaticamente.' };
         const items = applyImportedItems(result.items, n.id);
         state.nfe.unshift(n);
         state.nfeItems.push(...items);
         await db.put('nfe', n);
+        await db.put('nfeFiles', {
+            id: n.id,
+            nfeId: n.id,
+            blob: file,
+            mimeType: file.type || 'application/pdf',
+            name: file.name,
+            createdAt: n.createdAt,
+        });
         if (items.length)
             await db.bulkPut('nfeItems', items);
         log('import', `PDF importado: ${file.name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id);
@@ -1103,9 +1128,17 @@ else if (ext === 'pdf' || file.type === 'application/pdf') {
     }
     catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: 'error', createdAt: now(), fileBlob: file, parseWarnings: [message], note: 'Falha na leitura do PDF.' };
+        const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: 'error', createdAt: now(), parseWarnings: [message], note: 'Falha na leitura do PDF.' };
         state.nfe.unshift(n);
         await db.put('nfe', n);
+        await db.put('nfeFiles', {
+            id: n.id,
+            nfeId: n.id,
+            blob: file,
+            mimeType: file.type || 'application/pdf',
+            name: file.name,
+            createdAt: n.createdAt,
+        });
         log('import', `Erro ao ler PDF: ${file.name}`, message, 'nfe', n.id);
         toast(message, 'error');
         renderPage();
@@ -1321,7 +1354,7 @@ async function importSnapshot(parsed, name) {
     toast(`Importação concluída: ${created} novos · ${updated} atualizados`);
     renderPage();
 }
-function exportSnapshot() { const safeProducts = state.products.map(p => { const { photoBlob, ...safe } = p; return safe; }); const snapshot = { products: safeProducts, suppliers: state.suppliers, categories: state.categories, movements: state.movements, nfe: state.nfe.map(n => { const { fileBlob, ...safe } = n; return safe; }), nfeItems: state.nfeItems, quotes: state.quotes, audit: state.audit, config: state.config }; downloadText(`almoxarifado-v9-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(snapshot, null, 2), 'application/json'); log('export', 'Backup JSON exportado', 'Snapshot completo'); toast('Backup JSON exportado'); }
+function exportSnapshot() { const snapshot = { products: state.products, suppliers: state.suppliers, categories: state.categories, movements: state.movements, nfe: state.nfe, nfeItems: state.nfeItems, quotes: state.quotes, audit: state.audit, config: state.config }; downloadText(`almoxarifado-v9-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(snapshot, null, 2), 'application/json'); log('export', 'Backup JSON exportado', 'Snapshot completo'); toast('Backup JSON exportado'); }
 function exportCsv() { const rows = [['Código', 'Produto', 'Fornecedor', 'Categoria', 'Unidade', 'Estoque', 'Mínimo', 'Custo atual', 'Valor estoque', 'Status']]; for (const p of state.products) {
     rows.push([p.code, p.name, getSupplier(p.supplierId)?.name || p.supplierNameLegacy || '', getCategory(p.categoryId)?.name || '', p.unit, String(p.currentStock).replace('.', ','), String(p.minimumStock).replace('.', ','), String(p.currentCost).replace('.', ','), String(p.currentStock * p.currentCost).replace('.', ','), statusLabel(statusFor(p))]);
 } downloadText('almoxarifado-produtos.csv', rows.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';')).join('\n'), 'text/csv;charset=utf-8'); log('export', 'CSV de produtos exportado'); toast('CSV exportado'); }
