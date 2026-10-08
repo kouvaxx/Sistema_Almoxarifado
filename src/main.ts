@@ -1328,7 +1328,7 @@ else if (action === 'nfe') {
 async function init() {
     mountHiddenInputs();
     wire();
-    const migrated = await tryLegacyMigration();
+    const migrated = await tryLegacyMigration(log);
     const snapshot = await seedDatabase();
     state = { ...state, ...snapshot, theme: snapshot.config.theme };
     rebuildIndexes();
