@@ -523,7 +523,7 @@ async function processNfe(id) {
         toast(result.message, 'warning');
         return;
     }
-    state.movements.unshift(...result.movements);
+    state.movements.unshift(...result.movements.slice().reverse());
     rebuildIndexes();
     log('import', `Documento processado: ${n.sourceName}`, `${result.updatedProductCount} movimentos · ${result.createdProductCount} novos produtos`, 'nfe', id);
     closeModal();
