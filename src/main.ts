@@ -564,7 +564,7 @@ async function deleteNfe(id) { const n = state.nfe.find(x => x.id === id); if (!
     return;
 } if (!confirm(`Excluir o documento "${n.sourceName}" e todos os itens reconhecidos?`))
     return; const items = state.nfeItems.filter(i => i.nfeId === id); for (const item of items)
-    await db.delete('nfeItems', item.id); state.nfeItems = state.nfeItems.filter(i => i.nfeId !== id); state.nfe = state.nfe.filter(x => x.id !== id); await db.delete('nfe', id); log('delete', `Documento excluído: ${n.sourceName}`, `${items.length} itens removidos`, 'nfe', id); closeModal(); renderPage(); toast('Documento excluído', 'warning'); }
+    await db.delete('nfeItems', item.id); state.nfeItems = state.nfeItems.filter(i => i.nfeId !== id); state.nfe = state.nfe.filter(x => x.id !== id); await db.delete('nfeFiles', id); await db.delete('nfe', id); log('delete', `Documento excluído: ${n.sourceName}`, `${items.length} itens removidos`, 'nfe', id); closeModal(); renderPage(); toast('Documento excluído', 'warning'); }
 async function cancelNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n || n.status === 'processed')
     return; n.status = 'cancelled'; n.note = `Revisão cancelada em ${dateTime(now())}.`; await db.put('nfe', n); log('update', `Revisão cancelada: ${n.sourceName}`, 'Documento mantido para histórico', 'nfe', id); closeModal(); renderPage(); toast('Revisão cancelada', 'warning'); }
 async function reopenNfe(id) { const n = state.nfe.find(x => x.id === id); if (!n || n.status !== 'cancelled')
@@ -1113,6 +1113,14 @@ else if (ext === 'pdf' || file.type === 'application/pdf') {
         state.nfe.unshift(n);
         state.nfeItems.push(...items);
         await db.put('nfe', n);
+        await db.put('nfeFiles', {
+            id: n.id,
+            nfeId: n.id,
+            blob: file,
+            mimeType: file.type || 'application/pdf',
+            name: file.name,
+            createdAt: n.createdAt,
+        });
         if (items.length)
             await db.bulkPut('nfeItems', items);
         log('import', `PDF importado: ${file.name}`, `${items.length} itens · ${result.profile} · ${Math.round(result.profileConfidence * 100)}%`, 'nfe', n.id);
@@ -1124,6 +1132,14 @@ else if (ext === 'pdf' || file.type === 'application/pdf') {
         const n = { id: uid('nfe'), sourceName: file.name, sourceType: 'pdf', status: 'error', createdAt: now(), parseWarnings: [message], note: 'Falha na leitura do PDF.' };
         state.nfe.unshift(n);
         await db.put('nfe', n);
+        await db.put('nfeFiles', {
+            id: n.id,
+            nfeId: n.id,
+            blob: file,
+            mimeType: file.type || 'application/pdf',
+            name: file.name,
+            createdAt: n.createdAt,
+        });
         log('import', `Erro ao ler PDF: ${file.name}`, message, 'nfe', n.id);
         toast(message, 'error');
         renderPage();
@@ -1339,7 +1355,7 @@ async function importSnapshot(parsed, name) {
     toast(`Importação concluída: ${created} novos · ${updated} atualizados`);
     renderPage();
 }
-function exportSnapshot() { const safeProducts = state.products.map(p => { const { photoBlob, ...safe } = p; return safe; }); const snapshot = { products: safeProducts, suppliers: state.suppliers, categories: state.categories, movements: state.movements, nfe: state.nfe.map(n => { const { fileBlob, ...safe } = n; return safe; }), nfeItems: state.nfeItems, quotes: state.quotes, audit: state.audit, config: state.config }; downloadText(`almoxarifado-v9-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(snapshot, null, 2), 'application/json'); log('export', 'Backup JSON exportado', 'Snapshot completo'); toast('Backup JSON exportado'); }
+function exportSnapshot() { const snapshot = { products: state.products, suppliers: state.suppliers, categories: state.categories, movements: state.movements, nfe: state.nfe, nfeItems: state.nfeItems, quotes: state.quotes, audit: state.audit, config: state.config }; downloadText(`almoxarifado-v9-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(snapshot, null, 2), 'application/json'); log('export', 'Backup JSON exportado', 'Snapshot completo'); toast('Backup JSON exportado'); }
 function exportCsv() { const rows = [['Código', 'Produto', 'Fornecedor', 'Categoria', 'Unidade', 'Estoque', 'Mínimo', 'Custo atual', 'Valor estoque', 'Status']]; for (const p of state.products) {
     rows.push([p.code, p.name, getSupplier(p.supplierId)?.name || p.supplierNameLegacy || '', getCategory(p.categoryId)?.name || '', p.unit, String(p.currentStock).replace('.', ','), String(p.minimumStock).replace('.', ','), String(p.currentCost).replace('.', ','), String(p.currentStock * p.currentCost).replace('.', ','), statusLabel(statusFor(p))]);
 } downloadText('almoxarifado-produtos.csv', rows.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';')).join('\n'), 'text/csv;charset=utf-8'); log('export', 'CSV de produtos exportado'); toast('CSV exportado'); }
